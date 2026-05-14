@@ -990,19 +990,12 @@ async function saveWord() {
   deletedWords = deletedWords.filter(w => w !== wordLower);
   persist();
 
-  // push to supabase
+  // push to supabase — upsert handles both fresh inserts and tombstone un-deletes
   if (currentUser) {
     try {
-      // check if a tombstone exists for this word and un-delete it
-      const existing = await sbFetch('/vocabs?word=eq.' + encodeURIComponent(entry.word));
-      if (existing && existing.length > 0) {
-        // row exists (was tombstoned) — update it with new data and clear deleted flag
-        await sbFetch('/vocabs?word=eq.' + encodeURIComponent(entry.word),
-          { method: 'PATCH', body: JSON.stringify({...vocabToRow(entry), deleted: false}), prefer: 'return=minimal' });
-      } else {
-        // fresh insert
-        await sbFetch('/vocabs', { method: 'POST', body: JSON.stringify([vocabToRow(entry, false)]), prefer: 'return=minimal' });
-      }
+      await sbFetch('/vocabs?on_conflict=user_id%2Cword', { method: 'POST',
+        body: JSON.stringify([vocabToRow(entry, false)]),
+        prefer: 'resolution=merge-duplicates,return=minimal' });
     } catch(e) { console.warn('Supabase push failed:', e); }
   }
 
