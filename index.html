@@ -724,7 +724,7 @@ async function syncWithSupabase() {
       } else if (!remoteMap.has(dw)) {
         // insert tombstone so other devices know this word was deleted
         await sbFetch('/vocabs', { method: 'POST',
-          body: JSON.stringify([{ word: dw, definition: '', translation: '', synonyms: '[]', antonyms: '[]', lesson: '', correct: 0, wrong: 0, deleted: true }]),
+          body: JSON.stringify([{ user_id: currentUser.id, word: dw, definition: '', translation: '', synonyms: '[]', antonyms: '[]', lesson: '', correct: 0, wrong: 0, deleted: true }]),
           prefer: 'return=minimal' });
       }
     }
@@ -758,6 +758,7 @@ async function syncWithSupabase() {
         const newCorrect = Math.max(local.correct || 0, r.correct || 0);
         const newWrong = Math.max(local.wrong || 0, r.wrong || 0);
         toUpsert.push({
+          user_id: currentUser.id,
           word: r.word,
           definition: local.definition || '',
           translation: local.translation || '',
