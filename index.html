@@ -504,12 +504,15 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 let supabaseClient = null;
 let currentUser    = null;
 
-let vocab = JSON.parse(localStorage.getItem('vocab_quiz_words') || '[]').map(v => ({
-  ...v,
-  definition: typeof v.definition === 'string' ? v.definition : (Array.isArray(v.definition) ? v.definition.join('\n') : String(v.definition || '')),
-  translation: typeof v.translation === 'string' ? v.translation : String(v.translation || '')
-}));
-let deletedWords = JSON.parse(localStorage.getItem('vocab_quiz_deleted') || '[]');
+function normalizeVocab(arr) {
+  return arr.map(v => ({
+    ...v,
+    definition: typeof v.definition === 'string' ? v.definition : (Array.isArray(v.definition) ? v.definition.join('\n') : String(v.definition || '')),
+    translation: typeof v.translation === 'string' ? v.translation : String(v.translation || '')
+  }));
+}
+let vocab = [];
+let deletedWords = [];
 let quizMode = 'chinese';
 let selectedSubsets = new Set();
 let subsetInitialized = false;
@@ -520,9 +523,11 @@ let previewSyns = [], previewAnts = [];
 // settings
 let AI_PROVIDER = localStorage.getItem('vq_ai_provider') || 'gemini';
 
+function vocabKey()    { return currentUser ? 'vocab_quiz_words_'   + currentUser.id : 'vocab_quiz_words'; }
+function deletedKey()  { return currentUser ? 'vocab_quiz_deleted_' + currentUser.id : 'vocab_quiz_deleted'; }
 function persist() {
-  localStorage.setItem('vocab_quiz_words', JSON.stringify(vocab));
-  localStorage.setItem('vocab_quiz_deleted', JSON.stringify(deletedWords));
+  localStorage.setItem(vocabKey(),   JSON.stringify(vocab));
+  localStorage.setItem(deletedKey(), JSON.stringify(deletedWords));
 }
 function touch(v) {
   v.lastModified = Date.now();
@@ -574,11 +579,34 @@ function saveSettings() {
    AUTH
 ═══════════════════════════════════════════════ */
 function showLoginScreen() {
+  vocab = [];
+  deletedWords = [];
   document.getElementById('main-app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'block';
 }
 
 function showMainApp() {
+  // Load this user's vocab from their own localStorage key
+  const stored = localStorage.getItem(vocabKey());
+  if (stored !== null) {
+    vocab = normalizeVocab(JSON.parse(stored));
+    deletedWords = JSON.parse(localStorage.getItem(deletedKey()) || '[]');
+  } else {
+    // First login on this device — migrate legacy data if present, otherwise start empty
+    const legacy = localStorage.getItem('vocab_quiz_words');
+    if (legacy) {
+      vocab = normalizeVocab(JSON.parse(legacy));
+      deletedWords = JSON.parse(localStorage.getItem('vocab_quiz_deleted') || '[]');
+      localStorage.setItem(vocabKey(), JSON.stringify(vocab));
+      localStorage.setItem(deletedKey(), JSON.stringify(deletedWords));
+      localStorage.removeItem('vocab_quiz_words');
+      localStorage.removeItem('vocab_quiz_deleted');
+    } else {
+      vocab = [];
+      deletedWords = [];
+    }
+  }
+
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('main-app').style.display = 'block';
   document.getElementById('user-email').textContent = currentUser?.email ?? '';
@@ -588,7 +616,7 @@ function showMainApp() {
   document.getElementById('show-bulk-btn').checked = showBulk;
   applyBulkVisibility(showBulk);
   // init word list UI
-  try { populateLessonSelect(); } catch(e) { console.warn('populateLessonSelect:', e); }
+  try { renderList(); populateLessonSelect(); } catch(e) { console.warn('showMainApp render:', e); }
   document.getElementById('sync-note').textContent = 'Synced as ' + (currentUser?.email ?? '');
 }
 
