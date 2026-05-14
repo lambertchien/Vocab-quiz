@@ -586,26 +586,10 @@ function showLoginScreen() {
 }
 
 function showMainApp() {
-  // Load this user's vocab from their own localStorage key
+  // Load this user's vocab from their own localStorage key; always start empty if not found
   const stored = localStorage.getItem(vocabKey());
-  if (stored !== null) {
-    vocab = normalizeVocab(JSON.parse(stored));
-    deletedWords = JSON.parse(localStorage.getItem(deletedKey()) || '[]');
-  } else {
-    // First login on this device — migrate legacy data if present, otherwise start empty
-    const legacy = localStorage.getItem('vocab_quiz_words');
-    if (legacy) {
-      vocab = normalizeVocab(JSON.parse(legacy));
-      deletedWords = JSON.parse(localStorage.getItem('vocab_quiz_deleted') || '[]');
-      localStorage.setItem(vocabKey(), JSON.stringify(vocab));
-      localStorage.setItem(deletedKey(), JSON.stringify(deletedWords));
-      localStorage.removeItem('vocab_quiz_words');
-      localStorage.removeItem('vocab_quiz_deleted');
-    } else {
-      vocab = [];
-      deletedWords = [];
-    }
-  }
+  vocab = stored ? normalizeVocab(JSON.parse(stored)) : [];
+  deletedWords = JSON.parse(localStorage.getItem(deletedKey()) || '[]');
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('main-app').style.display = 'block';
@@ -750,10 +734,10 @@ async function syncWithSupabase() {
         await sbFetch('/vocabs?word=eq.' + encodeURIComponent(dw),
           { method: 'PATCH', body: JSON.stringify({ deleted: true }), prefer: 'return=minimal' });
       } else if (!remoteMap.has(dw)) {
-        // insert tombstone so other devices know this word was deleted
-        await sbFetch('/vocabs', { method: 'POST',
+        // upsert tombstone so other devices know this word was deleted
+        await sbFetch('/vocabs?on_conflict=user_id%2Cword', { method: 'POST',
           body: JSON.stringify([{ user_id: currentUser.id, word: dw, definition: '', translation: '', synonyms: '[]', antonyms: '[]', lesson: '', correct: 0, wrong: 0, deleted: true }]),
-          prefer: 'return=minimal' });
+          prefer: 'resolution=merge-duplicates,return=minimal' });
       }
     }
     deletedWords = [];
@@ -765,7 +749,7 @@ async function syncWithSupabase() {
       const CHUNK_SIZE = 20;
       const rows = toInsert.map(v => vocabToRow(v, false));
       for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-        await sbFetch('/vocabs', { method: 'POST', body: JSON.stringify(rows.slice(i, i + CHUNK_SIZE)), prefer: 'return=minimal' });
+        await sbFetch('/vocabs?on_conflict=user_id%2Cword', { method: 'POST', body: JSON.stringify(rows.slice(i, i + CHUNK_SIZE)), prefer: 'resolution=merge-duplicates,return=minimal' });
       }
     }
 
