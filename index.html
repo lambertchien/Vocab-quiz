@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Vocab Builder</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -210,52 +211,59 @@
   .flashcard-controls { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; margin-bottom: 12px; }
   .speed-btn { font-size: 12px; padding: 4px 12px; }
   .speed-btn.selected { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+  /* login screen */
+  .login-screen { width: 100%; max-width: 400px; background: var(--bg); border-radius: var(--radius-lg); border: 0.5px solid var(--border); padding: 2rem 1.5rem; }
+  .login-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .login-sub { font-size: 13px; color: var(--text2); margin-bottom: 1.5rem; }
+  .user-chip { display: flex; align-items: center; gap: 8px; }
+  .user-email { font-size: 12px; color: var(--text3); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
-<div class="app">
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen" class="login-screen" style="display:none">
+  <div class="login-title">Vocab Builder</div>
+  <div class="login-sub">Sign in to access your word list</div>
+  <div class="field-label" style="margin-top:0">Email</div>
+  <input type="email" id="login-email" placeholder="your@email.com" onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()" />
+  <div class="field-label">Password</div>
+  <input type="password" id="login-password" placeholder="Password" onkeydown="if(event.key==='Enter')signIn()" />
+  <div id="login-status" style="min-height:40px;margin-top:10px"></div>
+  <div class="btn-row">
+    <button class="primary" onclick="signIn()" style="flex:1" id="signin-btn">Sign in</button>
+    <button onclick="signUp()" style="flex:1" id="signup-btn">Create account</button>
+  </div>
+</div>
+
+<div class="app" id="main-app" style="display:none">
   <div class="app-header">
     <div class="app-title-block">
       <div class="app-title">Vocab Builder</div>
       <div class="app-sub">Look up words, organise by lesson, quiz yourself.</div>
     </div>
-    <button class="settings-btn" onclick="toggleSettings()" title="Settings">⚙️</button>
+    <div class="user-chip">
+      <span class="user-email" id="user-email"></span>
+      <button class="settings-btn" onclick="toggleSettings()" title="Settings">⚙️</button>
+      <button class="settings-btn" onclick="signOut()" title="Sign out" style="font-size:14px">↪</button>
+    </div>
   </div>
 
   <!-- SETTINGS PANEL -->
   <div id="settings-panel" class="settings-panel" style="display:none">
     <h3>Settings</h3>
     <div class="settings-row">
-      <div class="field-label">AI Provider for grading</div>
+      <div class="field-label">AI Provider</div>
       <select id="ai-provider-select" onchange="toggleProviderFields()">
-        <option value="gemini">Google Gemini</option>
-        <option value="anthropic">Anthropic Claude</option>
+        <option value="gemini">Google Gemini (gemini-2.5-flash)</option>
+        <option value="anthropic">Anthropic Claude (claude-sonnet-4)</option>
       </select>
-      <div class="settings-note" style="margin-top:6px">
-        Active model: <strong id="active-model-display">—</strong>
-      </div>
-    </div>
-    <div id="gemini-fields" class="settings-row">
-      <div class="field-label">Gemini API Key</div>
-      <input type="password" id="gemini-key-input" placeholder="AIza..." />
-      <div class="settings-note">Free at <strong>aistudio.google.com</strong> → Get API key. No credit card needed.</div>
-    </div>
-    <div id="anthropic-fields" class="settings-row" style="display:none">
-      <div class="field-label">Anthropic API Key</div>
-      <input type="password" id="api-key-input" placeholder="sk-ant-..." />
-      <div class="settings-note">Pay-as-you-go at <strong>console.anthropic.com</strong>.</div>
-    </div>
-    <div class="settings-row" style="margin-top:14px">
-      <div class="field-label">Supabase URL <span style="font-weight:400;color:var(--text3)">(for cross-device sync)</span></div>
-      <input type="text" id="sb-url-input" placeholder="https://xxxx.supabase.co" />
-      <div class="field-label">Supabase Anon Key</div>
-      <input type="password" id="sb-key-input" placeholder="eyJ..." />
-      <div class="settings-note">Optional. Connect Supabase to sync your vocab across devices. See setup guide below.</div>
     </div>
     <div class="settings-row" style="margin-top:14px">
       <label style="display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="show-bulk-btn" style="width:14px;height:14px;accent-color:var(--text)" />
-        <span>Show "AI re-explain" button in My Words <span style="color:var(--text3)">(hide once migration is done)</span></span>
+        <span>Show "AI re-explain" button in My Words</span>
       </label>
     </div>
     <div class="btn-row">
@@ -263,25 +271,6 @@
       <button onclick="toggleSettings()">Close</button>
     </div>
     <div id="settings-status"></div>
-    <div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--border)">
-      <div class="field-label" style="margin-top:0">Supabase setup (one time)</div>
-      <div class="settings-note" style="line-height:1.8">
-        1. Create free account at <strong>supabase.com</strong><br>
-        2. New project → copy URL + anon key above<br>
-        3. In SQL Editor run:<br>
-        <code style="display:block;background:var(--bg3);padding:8px;border-radius:6px;margin:6px 0;font-size:11px;line-height:1.6">
-create table vocabs (
-  id bigint generated always as identity primary key,
-  device_id text not null,
-  word text, definition text, translation text,
-  synonyms text, antonyms text, lesson text,
-  correct int default 0, wrong int default 0
-);
-alter table vocabs enable row level security;
-create policy "open" on vocabs for all using (true) with check (true);</code>
-        4. Save settings above → click Sync
-      </div>
-    </div>
   </div>
 
   <div class="tabs">
@@ -507,6 +496,14 @@ create policy "open" on vocabs for all using (true) with check (true);</code>
 /* ═══════════════════════════════════════════════
    STATE
 ═══════════════════════════════════════════════ */
+// ── Fill these in before deploying ──────────────────────────────────────────
+const SUPABASE_URL      = 'https://xxxx.supabase.co';   // your project URL
+const SUPABASE_ANON_KEY = 'eyJ...';                      // your project anon key
+// ────────────────────────────────────────────────────────────────────────────
+
+let supabaseClient = null;
+let currentUser    = null;
+
 let vocab = JSON.parse(localStorage.getItem('vocab_quiz_words') || '[]').map(v => ({
   ...v,
   definition: typeof v.definition === 'string' ? v.definition : (Array.isArray(v.definition) ? v.definition.join('\n') : String(v.definition || '')),
@@ -521,14 +518,7 @@ let currentMeanings = [], currentMeaningIdx = 0;
 let previewSyns = [], previewAnts = [];
 
 // settings
-let ANTHROPIC_KEY = localStorage.getItem('vq_anthropic_key') || '';
-let GEMINI_KEY = localStorage.getItem('vq_gemini_key') || '';
 let AI_PROVIDER = localStorage.getItem('vq_ai_provider') || 'gemini';
-let SB_URL = localStorage.getItem('vq_sb_url') || '';
-let SB_KEY = localStorage.getItem('vq_sb_key') || '';
-// stable device id for supabase (no auth needed)
-let DEVICE_ID = localStorage.getItem('vq_device_id');
-if (!DEVICE_ID) { DEVICE_ID = 'dev_' + Math.random().toString(36).slice(2); localStorage.setItem('vq_device_id', DEVICE_ID); }
 
 function persist() {
   localStorage.setItem('vocab_quiz_words', JSON.stringify(vocab));
@@ -539,21 +529,13 @@ function touch(v) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  try { populateLessonSelect(); } catch(e) { console.warn('populateLessonSelect:', e); }
+  supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  try {
-    document.getElementById('api-key-input').value = ANTHROPIC_KEY;
-    document.getElementById('gemini-key-input').value = GEMINI_KEY;
-    document.getElementById('ai-provider-select').value = AI_PROVIDER;
-    document.getElementById('sb-url-input').value = SB_URL;
-    document.getElementById('sb-key-input').value = SB_KEY;
-    const showBulkEl = document.getElementById('show-bulk-btn');
-    const showBulk = localStorage.getItem('vq_show_bulk') !== 'false';
-    if (showBulkEl) showBulkEl.checked = showBulk;
-    applyBulkVisibility(showBulk);
-    toggleProviderFields();
-    updateSyncNote();
-  } catch(e) { console.warn('Settings init error:', e); }
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    currentUser = session?.user ?? null;
+    if (currentUser) showMainApp();
+    else showLoginScreen();
+  });
 });
 
 /* ═══════════════════════════════════════════════
@@ -574,47 +556,89 @@ function applyBulkVisibility(show) {
 }
 
 function toggleProviderFields() {
-  const provider = document.getElementById('ai-provider-select').value;
-  document.getElementById('gemini-fields').style.display = provider === 'gemini' ? 'block' : 'none';
-  document.getElementById('anthropic-fields').style.display = provider === 'anthropic' ? 'block' : 'none';
-  const modelEl = document.getElementById('active-model-display');
-  if (modelEl) modelEl.textContent = provider === 'gemini' ? 'gemini-2.5-flash' : 'claude-sonnet-4-20250514';
+  // provider selector is still shown in settings — no per-field toggles needed
 }
 
 function saveSettings() {
   AI_PROVIDER = document.getElementById('ai-provider-select').value;
-  ANTHROPIC_KEY = document.getElementById('api-key-input').value.trim();
-  GEMINI_KEY = document.getElementById('gemini-key-input').value.trim();
-  SB_URL = document.getElementById('sb-url-input').value.trim().replace(/\/$/, '');
-  SB_KEY = document.getElementById('sb-key-input').value.trim();
   localStorage.setItem('vq_ai_provider', AI_PROVIDER);
-  localStorage.setItem('vq_anthropic_key', ANTHROPIC_KEY);
-  localStorage.setItem('vq_gemini_key', GEMINI_KEY);
-  localStorage.setItem('vq_sb_url', SB_URL);
-  localStorage.setItem('vq_sb_key', SB_KEY);
   const showBulk = document.getElementById('show-bulk-btn').checked;
   localStorage.setItem('vq_show_bulk', showBulk);
   applyBulkVisibility(showBulk);
   const el = document.getElementById('settings-status');
   el.innerHTML = '<div class="status success">Saved!</div>';
   setTimeout(() => el.innerHTML = '', 2000);
-  updateSyncNote();
 }
 
-function updateSyncNote() {
-  document.getElementById('sync-note').textContent = SB_URL ? 'Supabase connected' : 'Local storage only';
+/* ═══════════════════════════════════════════════
+   AUTH
+═══════════════════════════════════════════════ */
+function showLoginScreen() {
+  document.getElementById('main-app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'block';
+}
+
+function showMainApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('main-app').style.display = 'block';
+  document.getElementById('user-email').textContent = currentUser?.email ?? '';
+  // init settings UI
+  document.getElementById('ai-provider-select').value = AI_PROVIDER;
+  const showBulk = localStorage.getItem('vq_show_bulk') !== 'false';
+  document.getElementById('show-bulk-btn').checked = showBulk;
+  applyBulkVisibility(showBulk);
+  // init word list UI
+  try { populateLessonSelect(); } catch(e) { console.warn('populateLessonSelect:', e); }
+  document.getElementById('sync-note').textContent = 'Synced as ' + (currentUser?.email ?? '');
+}
+
+async function signIn() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!email || !password) return;
+  setLoginStatus('Signing in…', 'loading');
+  document.getElementById('signin-btn').disabled = true;
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  document.getElementById('signin-btn').disabled = false;
+  if (error) setLoginStatus(error.message, 'error');
+  // on success, onAuthStateChange fires and calls showMainApp()
+}
+
+async function signUp() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!email || !password) { setLoginStatus('Enter email and password first.', 'error'); return; }
+  if (password.length < 6) { setLoginStatus('Password must be at least 6 characters.', 'error'); return; }
+  setLoginStatus('Creating account…', 'loading');
+  document.getElementById('signup-btn').disabled = true;
+  const { error } = await supabaseClient.auth.signUp({ email, password });
+  document.getElementById('signup-btn').disabled = false;
+  if (error) setLoginStatus(error.message, 'error');
+  else setLoginStatus('Account created! Check your email to confirm, then sign in.', 'success');
+}
+
+async function signOut() {
+  await supabaseClient.auth.signOut();
+  currentUser = null;
+  // onAuthStateChange fires and calls showLoginScreen()
+}
+
+function setLoginStatus(msg, type) {
+  document.getElementById('login-status').innerHTML =
+    msg ? `<div class="status ${type}">${msg}</div>` : '';
 }
 
 /* ═══════════════════════════════════════════════
    SUPABASE SYNC
 ═══════════════════════════════════════════════ */
 async function sbFetch(path, opts = {}) {
-  if (!SB_URL || !SB_KEY) throw new Error('Supabase not configured');
-  const res = await fetch(SB_URL + '/rest/v1' + path, {
+  const session = (await supabaseClient.auth.getSession()).data.session;
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(SUPABASE_URL + '/rest/v1' + path, {
     ...opts,
     headers: {
-      'apikey': SB_KEY,
-      'Authorization': 'Bearer ' + SB_KEY,
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + session.access_token, // JWT — tells RLS who the user is
       'Content-Type': 'application/json',
       'Prefer': opts.prefer || 'return=representation',
       ...(opts.headers || {})
@@ -632,6 +656,7 @@ async function sbFetch(path, opts = {}) {
 
 function vocabToRow(v, deleted=false) {
   return {
+    user_id: currentUser.id,
     word: v.word, definition: v.definition,
     translation: v.translation || '',
     synonyms: JSON.stringify(v.synonyms || []),
@@ -668,9 +693,8 @@ function rowToVocab(r) {
 }
 
 async function syncWithSupabase() {
-  if (!SB_URL || !SB_KEY) {
-    alert('Please configure Supabase in Settings first.');
-    toggleSettings();
+  if (!currentUser) {
+    alert('Please sign in first.');
     return;
   }
   const btn = document.getElementById('sync-btn');
@@ -761,7 +785,7 @@ async function syncWithSupabase() {
     const CHUNK_SIZE = 20;
     for (let i = 0; i < toUpsert.length; i += CHUNK_SIZE) {
       const chunk = toUpsert.slice(i, i + CHUNK_SIZE);
-      await sbFetch('/vocabs?on_conflict=word', {
+      await sbFetch('/vocabs?on_conflict=user_id%2Cword', {
         method: 'POST',
         body: JSON.stringify(chunk),
         prefer: 'resolution=merge-duplicates,return=minimal'
@@ -783,7 +807,7 @@ async function syncWithSupabase() {
     if (note) { note.textContent = msg.slice(0, 80); note.style.color = '#A32D2D'; }
     setTimeout(() => {
       btn.textContent = '↕ Sync';
-      if (note) { note.textContent = SB_URL ? 'Supabase connected' : 'Local storage only'; note.style.color = ''; }
+      if (note) { note.textContent = 'Synced as ' + (currentUser?.email ?? ''); note.style.color = ''; }
     }, 5000);
   }
 }
@@ -860,11 +884,6 @@ function removePreviewTag(type, i) {
 async function lookupWord() {
   const word = document.getElementById('word-input').value.trim();
   if (!word) return;
-  const activeKey = AI_PROVIDER === 'gemini' ? GEMINI_KEY : ANTHROPIC_KEY;
-  if (!activeKey) {
-    setStatus('No AI API key set. Open Settings (⚙️) to add one.', 'error');
-    return;
-  }
   const btn = document.getElementById('lookup-btn');
   btn.disabled = true;
   setStatus('Looking up "' + word + '" with AI…', 'loading');
@@ -878,7 +897,7 @@ async function lookupWord() {
 CRITICAL: Never use the word "${word}" anywhere in either explanation. Reply ONLY with the JSON object, no markdown, no extra text. If the word does not exist in English, return {"error": "Word not found"}.`;
 
   try {
-    const rawText = AI_PROVIDER === 'gemini' ? await callGemini(prompt) : await callAnthropic(prompt);
+    const rawText = await callAI(prompt);
     const parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
     if (parsed.error) throw new Error(parsed.error);
 
@@ -919,7 +938,7 @@ async function fetchSynAnt() {
   const prompt = `Word: "${word}". JSON only: {"synonyms":["4-6 simple synonyms"],"antonyms":["4-6 simple antonyms"]}`;
 
   try {
-    const rawText = AI_PROVIDER === 'gemini' ? await callGemini(prompt) : await callAnthropic(prompt);
+    const rawText = await callAI(prompt);
     const parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
     previewSyns = parsed.synonyms || [];
     previewAnts = parsed.antonyms || [];
@@ -958,8 +977,8 @@ async function saveWord() {
   deletedWords = deletedWords.filter(w => w !== wordLower);
   persist();
 
-  // push to supabase if configured
-  if (SB_URL && SB_KEY) {
+  // push to supabase
+  if (currentUser) {
     try {
       // check if a tombstone exists for this word and un-delete it
       const existing = await sbFetch('/vocabs?word=eq.' + encodeURIComponent(entry.word));
@@ -1035,8 +1054,7 @@ function stopBulkReExplain() {
 }
 
 async function startBulkReExplain() {
-  const activeKey = AI_PROVIDER === 'gemini' ? GEMINI_KEY : ANTHROPIC_KEY;
-  if (!activeKey) { document.getElementById('bulk-status').textContent = 'No API key set. Open Settings ⚙️ first.'; return; }
+  if (!currentUser) { document.getElementById('bulk-status').textContent = 'Please sign in first.'; return; }
   const words = vocab.filter(v => bulkSelectedLessons.has(v.lesson || ''));
   if (!words.length) { document.getElementById('bulk-status').textContent = 'No words in selected lessons.'; return; }
   const confirmed = confirm(`This will re-explain ${words.length} word${words.length !== 1 ? 's' : ''} using AI and will use ${words.length} API requests (out of your 20/min quota). Continue?`);
@@ -1064,7 +1082,7 @@ CRITICAL: Never use the word "${v.word}" anywhere in either explanation. Reply O
     let wordDone = false;
     while (attempts < 3 && !wordDone) {
       try {
-        const rawText = AI_PROVIDER === 'gemini' ? await callGemini(prompt) : await callAnthropic(prompt);
+        const rawText = await callAI(prompt);
         const parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
         if (parsed.definition) v.definition = parsed.definition;
         if (parsed.translation) v.translation = parsed.translation;
@@ -1729,39 +1747,23 @@ JSON only: {"result":"correct"|"partial"|"wrong","feedback":"..."}`;
   }
 }
 
-async function callGemini(prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
-  const res = await fetch(url, {
+async function callAI(prompt) {
+  const session = (await supabaseClient.auth.getSession()).data.session;
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(SUPABASE_URL + '/functions/v1/ai-proxy', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + session.access_token
+    },
+    body: JSON.stringify({ provider: AI_PROVIDER, prompt })
   });
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message);
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-}
-
-async function callAnthropic(prompt) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-calls': 'true' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 300, messages: [{ role: 'user', content: prompt }] })
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message);
-  return data.content?.map(c => c.text || '').join('') || '';
+  if (data.error) throw new Error(data.error);
+  return data.text;
 }
 
 async function checkAnswerWithAI(v, ans) {
-  const activeKey = AI_PROVIDER === 'gemini' ? GEMINI_KEY : ANTHROPIC_KEY;
-  if (!activeKey) {
-    const fb = document.getElementById('quiz-feedback');
-    fb.style.display = 'block';
-    fb.className = 'quiz-feedback wrong';
-    fb.textContent = `No ${AI_PROVIDER === 'gemini' ? 'Gemini' : 'Anthropic'} API key set. Open Settings (⚙️) to add one.`;
-    return;
-  }
-
   const btn = document.getElementById('check-btn');
   btn.disabled = true;
   const fb = document.getElementById('quiz-feedback');
@@ -1773,7 +1775,7 @@ async function checkAnswerWithAI(v, ans) {
   const prompt = buildPrompt(v, ans);
 
   try {
-    const rawText = AI_PROVIDER === 'gemini' ? await callGemini(prompt) : await callAnthropic(prompt);
+    const rawText = await callAI(prompt);
     const parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
     const result = parsed.result || 'wrong';
 
