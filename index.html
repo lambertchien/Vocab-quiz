@@ -1324,7 +1324,7 @@ function renderList() {
             <div class="word-list-item" id="wli-${i}">
               <div class="item-header">
                 <div class="item-word-row">
-                  <div class="vocab-word">${v.word}</div>
+                  <div class="vocab-word">${escHtml(v.word)}</div>
                   <button class="speak-btn" onclick="speak('${v.word.replace(/'/g,"\\'")}');event.stopPropagation()" title="Pronounce">🔊</button>
                 </div>
                 <div class="item-actions">
@@ -1332,11 +1332,11 @@ function renderList() {
                   <button class="del-btn" onclick="deleteWord(${i})">remove</button>
                 </div>
               </div>
-              <div class="vocab-def" style="white-space:pre-line">${String(v.definition||'')}</div>
+              <div class="vocab-def" style="white-space:pre-line">${escHtml(v.definition)}</div>
               <div class="vocab-tags" style="margin-top:6px">
-                ${v.translation ? `<span class="tag zh" title="${String(v.translation||'')}">ZH: ${String(v.translation||'').length > 20 ? String(v.translation||'').slice(0,20) + "…" : String(v.translation||'')} </span>` : ''}
-                ${(v.synonyms||[]).map(s=>`<span class="tag syn">= ${s}</span>`).join('')}
-                ${(v.antonyms||[]).map(a=>`<span class="tag ant">≠ ${a}</span>`).join('')}
+                ${v.translation ? `<span class="tag zh" title="${escHtml(v.translation)}">ZH: ${escHtml(v.translation).length > 20 ? escHtml(v.translation).slice(0,20) + "…" : escHtml(v.translation)} </span>` : ''}
+                ${(v.synonyms||[]).map(s=>`<span class="tag syn">= ${escHtml(s)}</span>`).join('')}
+                ${(v.antonyms||[]).map(a=>`<span class="tag ant">≠ ${escHtml(a)}</span>`).join('')}
               </div>
               <div class="item-stats">Correct: <b>${v.correct||0}</b> &nbsp; Wrong: <b>${v.wrong||0}</b></div>
               <div class="edit-panel" id="ep-${i}" style="display:none">
@@ -1405,15 +1405,15 @@ function renderList() {
             <div class="word-list-item">
               <div class="item-header">
                 <div class="item-word-row">
-                  <div class="vocab-word">${v.word}</div>
+                  <div class="vocab-word">${escHtml(v.word)}</div>
                   <button class="speak-btn" onclick="speak('${v.word.replace(/'/g,"\\'")}');event.stopPropagation()" title="Pronounce">🔊</button>
                 </div>
               </div>
-              <div class="vocab-def" style="white-space:pre-line">${String(v.definition||'')}</div>
+              <div class="vocab-def" style="white-space:pre-line">${escHtml(v.definition)}</div>
               <div class="vocab-tags" style="margin-top:6px">
-                ${v.translation ? `<span class="tag zh">ZH: ${String(v.translation).length>20?String(v.translation).slice(0,20)+'…':String(v.translation)}</span>` : ''}
-                ${(v.synonyms||[]).map(s=>`<span class="tag syn">= ${s}</span>`).join('')}
-                ${(v.antonyms||[]).map(a=>`<span class="tag ant">≠ ${a}</span>`).join('')}
+                ${v.translation ? `<span class="tag zh">ZH: ${escHtml(v.translation).length>20?escHtml(v.translation).slice(0,20)+'…':escHtml(v.translation)}</span>` : ''}
+                ${(v.synonyms||[]).map(s=>`<span class="tag syn">= ${escHtml(s)}</span>`).join('')}
+                ${(v.antonyms||[]).map(a=>`<span class="tag ant">≠ ${escHtml(a)}</span>`).join('')}
               </div>
               <div class="item-stats">Correct: <b>${v.correct||0}</b> &nbsp; Wrong: <b>${v.wrong||0}</b></div>
             </div>`).join('')}
@@ -1497,6 +1497,10 @@ async function toggleLessonPreview(idx, btn) {
     el.textContent = 'Failed to load.';
     console.warn('toggleLessonPreview error:', e);
   }
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function shortEmail(email) {
