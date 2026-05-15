@@ -827,24 +827,25 @@ async function syncWithSupabase() {
       });
     }
 
-    // sync subscriptions
+    // sync subscriptions: merge remote-only subs into local, then replace remote with full local list
     const remoteSubs = await sbFetch('/lesson_subscriptions');
-    const remoteSubKeys = new Set(remoteSubs.map(s => s.owner_user_id + ':' + s.lesson_name));
-    const localSubKeys  = new Set(subscriptions.map(s => s.ownerUserId + ':' + s.name));
-    // push local subs not yet on remote
-    const subsToInsert = subscriptions.filter(s => !remoteSubKeys.has(s.ownerUserId + ':' + s.name));
-    if (subsToInsert.length) {
-      await sbFetch('/lesson_subscriptions?on_conflict=user_id%2Cowner_user_id%2Clesson_name', { method: 'POST',
-        body: JSON.stringify(subsToInsert.map(s => ({
-          user_id: currentUser.id, owner_user_id: s.ownerUserId, lesson_name: s.name, owner_email: s.ownerEmail
-        }))),
-        prefer: 'resolution=merge-duplicates,return=minimal'
-      });
-    }
-    // pull remote subs not yet local (subscribed on another device)
+    const localSubKeys = new Set(subscriptions.map(s => s.ownerUserId + ':' + s.name));
     for (const s of remoteSubs) {
       if (!localSubKeys.has(s.owner_user_id + ':' + s.lesson_name)) {
         subscriptions.push({ name: s.lesson_name, ownerUserId: s.owner_user_id, ownerEmail: s.owner_email });
+      }
+    }
+    // delete all then re-insert to avoid any conflict
+    await sbFetch('/lesson_subscriptions', { method: 'DELETE', prefer: 'return=minimal' });
+    if (subscriptions.length) {
+      const SUB_CHUNK = 20;
+      for (let i = 0; i < subscriptions.length; i += SUB_CHUNK) {
+        await sbFetch('/lesson_subscriptions', { method: 'POST',
+          body: JSON.stringify(subscriptions.slice(i, i + SUB_CHUNK).map(s => ({
+            user_id: currentUser.id, owner_user_id: s.ownerUserId, lesson_name: s.name, owner_email: s.ownerEmail
+          }))),
+          prefer: 'return=minimal'
+        });
       }
     }
 
@@ -1534,13 +1535,7 @@ function subscribeLesson(idx, btn) {
   const l = lessonsCache[idx];
   if (!l || subscriptions.some(s => s.ownerUserId === l.user_id && s.name === l.name)) return;
   subscriptions.push({ name: l.name, ownerUserId: l.user_id, ownerEmail: l.user_email });
-  persist();
-  if (currentUser) {
-    sbFetch('/lesson_subscriptions?on_conflict=user_id%2Cowner_user_id%2Clesson_name', { method: 'POST',
-      body: JSON.stringify([{ user_id: currentUser.id, owner_user_id: l.user_id, lesson_name: l.name, owner_email: l.user_email }]),
-      prefer: 'resolution=merge-duplicates,return=minimal'
-    }).catch(e => console.warn('subscribe push failed:', e));
-  }
+  persist(); // saved locally; pushed to Supabase on next sync
   btn.disabled = true; btn.textContent = '✓ Added';
   renderSubscribedLessons();
 }
@@ -1548,14 +1543,7 @@ function subscribeLesson(idx, btn) {
 function unsubscribeLesson(ownerUserId, lessonName) {
   if (!confirm(`Remove "${lessonName}" from your My Words list?`)) return;
   subscriptions = subscriptions.filter(s => !(s.ownerUserId === ownerUserId && s.name === lessonName));
-  persist();
-  if (currentUser) {
-    sbFetch('/lesson_subscriptions?user_id=eq.' + currentUser.id +
-      '&owner_user_id=eq.' + ownerUserId +
-      '&lesson_name=eq.' + encodeURIComponent(lessonName),
-      { method: 'DELETE', prefer: 'return=minimal' }
-    ).catch(e => console.warn('unsubscribe delete failed:', e));
-  }
+  persist(); // saved locally; pushed to Supabase on next sync
   renderSubscribedLessons();
   renderAllLessons(lessonsCache);
 }
