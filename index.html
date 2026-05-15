@@ -353,6 +353,12 @@
       <div class="bulk-status" id="bulk-status"></div>
     </div>
     <div id="word-list"></div>
+    <div style="margin-top:16px;padding-bottom:24px">
+      <button onclick="openAllLessons()" id="all-lessons-toggle" style="width:100%;font-size:13px;padding:9px 14px;text-align:left;border:0.5px solid var(--border);border-radius:var(--radius-lg);background:var(--bg2)">🌐 Browse All Lessons ▾</button>
+      <div id="all-lessons-panel" style="display:none;border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-top:6px;overflow:hidden">
+        <div id="all-lessons-list"></div>
+      </div>
+    </div>
   </div>
 
   <!-- FLASHCARD -->
@@ -513,6 +519,7 @@ function normalizeVocab(arr) {
 }
 let vocab = [];
 let deletedWords = [];
+let lessonsCache = [];
 let quizMode = 'chinese';
 let selectedSubsets = new Set();
 let subsetInitialized = false;
@@ -601,6 +608,11 @@ function showMainApp() {
   applyBulkVisibility(showBulk);
   // init word list UI
   try { renderList(); populateLessonSelect(); } catch(e) { console.warn('showMainApp render:', e); }
+  // register existing lessons so they appear in All Lessons for other users
+  if (currentUser) {
+    const names = [...new Set(vocab.map(v => v.lesson).filter(Boolean))];
+    names.forEach(name => registerLesson(name));
+  }
   document.getElementById('sync-note').textContent = 'Synced as ' + (currentUser?.email ?? '');
 }
 
@@ -996,6 +1008,7 @@ async function saveWord() {
       await sbFetch('/vocabs?on_conflict=user_id%2Cword', { method: 'POST',
         body: JSON.stringify([vocabToRow(entry, false)]),
         prefer: 'resolution=merge-duplicates,return=minimal' });
+      if (entry.lesson) registerLesson(entry.lesson);
     } catch(e) { console.warn('Supabase push failed:', e); }
   }
 
@@ -1195,25 +1208,22 @@ function cancelRenameLesson(gi) {
   document.getElementById('rename-panel-' + gi).style.display = 'none';
 }
 
-function confirmRenameLesson(gi, oldName) {
+async function confirmRenameLesson(gi, oldName) {
   const newName = document.getElementById('rename-input-' + gi).value.trim();
   if (!newName || newName === oldName) { cancelRenameLesson(gi); return; }
-  // update all words in this lesson
   vocab.forEach(v => {
-    if ((v.lesson || '') === oldName) {
-      v.lesson = newName;
-      touch(v);
-    }
+    if ((v.lesson || '') === oldName) { v.lesson = newName; touch(v); }
   });
-  // update subset selection
-  if (selectedSubsets.has(oldName)) {
-    selectedSubsets.delete(oldName);
-    selectedSubsets.add(newName);
-  }
+  if (selectedSubsets.has(oldName)) { selectedSubsets.delete(oldName); selectedSubsets.add(newName); }
   subsetInitialized = false;
   persist();
   renderList();
   populateLessonSelect();
+  if (currentUser && oldName) {
+    const old = lessonsCache.find(l => l.name === oldName && l.user_id === currentUser.id);
+    sbFetch('/lessons?name=eq.' + encodeURIComponent(oldName), { method: 'DELETE', prefer: 'return=minimal' }).catch(() => {});
+    registerLesson(newName, old?.source_user_email || null, old?.original_user_email || null);
+  }
 }
 
 function renderList() {
@@ -1236,6 +1246,7 @@ function renderList() {
         <div class="lesson-card-meta">
           <span class="lesson-card-count">${items.length} word${items.length !== 1 ? 's' : ''}</span>
           ${key ? `<button class="edit-btn" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();startRenameLesson(${gi},'${key.replace(/'/g,"\'")}')" title="Rename lesson">rename</button>` : ''}
+          <button class="del-btn" data-lesson="${key.replace(/"/g,'&quot;')}" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();deleteLesson(this.dataset.lesson)" title="Delete lesson">delete</button>
           <span class="lesson-card-chevron" id="chev-${gi}">&#9654;</span>
         </div>
       </div>
@@ -1305,6 +1316,147 @@ function toggleLesson(gi) {
   const body = document.getElementById('lcb-' + gi);
   const chev = document.getElementById('chev-' + gi);
   chev.classList.toggle('open', body.classList.toggle('open'));
+}
+
+/* ═══════════════════════════════════════════════
+   LESSON MANAGEMENT
+═══════════════════════════════════════════════ */
+async function registerLesson(name, sourceEmail = null, originalEmail = null) {
+  if (!currentUser || !name) return;
+  try {
+    await sbFetch('/lessons?on_conflict=user_id%2Cname', { method: 'POST',
+      body: JSON.stringify([{
+        name, user_id: currentUser.id, user_email: currentUser.email,
+        source_user_email: sourceEmail || null,
+        original_user_email: originalEmail || null
+      }]),
+      prefer: 'resolution=merge-duplicates,return=minimal'
+    });
+  } catch(e) { console.warn('registerLesson failed:', e); }
+}
+
+async function deleteLesson(lessonName) {
+  const words = vocab.filter(v => (v.lesson || '') === lessonName);
+  const label = lessonName || 'No lesson';
+  if (!confirm(`Delete "${label}" and all ${words.length} word${words.length !== 1 ? 's' : ''} in it?`)) return;
+  const wordKeys = words.map(w => w.word.toLowerCase());
+  vocab = vocab.filter(v => (v.lesson || '') !== lessonName);
+  deletedWords = [...new Set([...deletedWords, ...wordKeys])];
+  subsetInitialized = false;
+  persist(); renderList(); populateLessonSelect();
+  if (currentUser) {
+    if (lessonName) sbFetch('/lessons?name=eq.' + encodeURIComponent(lessonName),
+      { method: 'DELETE', prefer: 'return=minimal' }).catch(() => {});
+    words.forEach(w => sbFetch('/vocabs?word=eq.' + encodeURIComponent(w.word),
+      { method: 'PATCH', body: JSON.stringify({ deleted: true }), prefer: 'return=minimal' }
+    ).catch(() => {}));
+  }
+}
+
+async function fetchAllLessons() {
+  try {
+    const rows = await sbFetch('/lessons?order=name.asc%2Ccreated_at.asc');
+    lessonsCache = rows;
+    return rows;
+  } catch(e) { console.warn('fetchAllLessons failed:', e); return []; }
+}
+
+function shortEmail(email) {
+  if (!email) return '';
+  return email.length > 24 ? email.slice(0, 20) + '…' : email;
+}
+
+function renderAllLessons(lessons) {
+  const el = document.getElementById('all-lessons-list');
+  if (!el) return;
+  if (!lessons.length) {
+    el.innerHTML = '<div style="padding:14px;font-size:13px;color:var(--text3)">No lessons shared yet.</div>';
+    return;
+  }
+  const myLessons = new Set(vocab.map(v => v.lesson).filter(Boolean).map(l => l.toLowerCase()));
+  el.innerHTML = lessons.map((l, idx) => {
+    const isOwn = l.user_id === currentUser?.id;
+    const have  = myLessons.has(l.name.toLowerCase());
+    let attr = '';
+    if (l.source_user_email && l.original_user_email)
+      attr = `copied from ${shortEmail(l.source_user_email)} · originally by ${shortEmail(l.original_user_email)}`;
+    else if (l.source_user_email)
+      attr = `copied from ${shortEmail(l.source_user_email)}`;
+    const addBtn = isOwn ? '' :
+      `<button style="font-size:11px;padding:4px 10px;flex-shrink:0;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer"
+        ${have ? 'disabled' : ''} onclick="copyLesson(${idx},this)">
+        ${have ? '✓ Added' : '+ Add'}
+      </button>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:0.5px solid var(--border);gap:10px">
+      <div style="flex:1;min-width:0;overflow:hidden">
+        <div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.name}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${shortEmail(l.user_email)}${isOwn ? ' (you)' : ''}</div>
+        ${attr ? `<div style="font-size:11px;color:var(--text3)">${attr}</div>` : ''}
+      </div>
+      ${addBtn}
+    </div>`;
+  }).join('');
+}
+
+async function openAllLessons() {
+  const panel = document.getElementById('all-lessons-panel');
+  const btn   = document.getElementById('all-lessons-toggle');
+  if (panel.style.display !== 'none') {
+    panel.style.display = 'none';
+    btn.textContent = '🌐 Browse All Lessons ▾';
+    return;
+  }
+  panel.style.display = 'block';
+  btn.textContent = '🌐 Browse All Lessons ▴';
+  document.getElementById('all-lessons-list').innerHTML =
+    '<div style="padding:14px;font-size:13px;color:var(--text3)">Loading…</div>';
+  const lessons = await fetchAllLessons();
+  renderAllLessons(lessons);
+}
+
+async function copyLesson(idx, btn) {
+  const l = lessonsCache[idx];
+  if (!l) return;
+  btn.disabled = true; btn.textContent = 'Copying…';
+  try {
+    const rows = await sbFetch('/vocabs?user_id=eq.' + l.user_id +
+      '&lesson=eq.' + encodeURIComponent(l.name) + '&deleted=eq.false');
+    const newWords = [];
+    for (const r of rows) {
+      if (!vocab.find(v => v.word.toLowerCase() === r.word.toLowerCase())) {
+        const entry = {
+          word: r.word, definition: r.definition || '',
+          translation: r.translation || '',
+          synonyms: JSON.parse(r.synonyms || '[]'),
+          antonyms: JSON.parse(r.antonyms || '[]'),
+          lesson: l.name, correct: 0, wrong: 0
+        };
+        touch(entry);
+        vocab.push(entry);
+        newWords.push(vocabToRow(entry, false));
+      }
+    }
+    if (!newWords.length) { btn.textContent = '✓ Already added'; btn.disabled = false; return; }
+    subsetInitialized = false;
+    persist();
+    const CHUNK = 20;
+    for (let i = 0; i < newWords.length; i += CHUNK)
+      await sbFetch('/vocabs?on_conflict=user_id%2Cword', { method: 'POST',
+        body: JSON.stringify(newWords.slice(i, i + CHUNK)),
+        prefer: 'resolution=merge-duplicates,return=minimal' });
+    // attribution: source is l.user_email; original is l.original_user_email if source was a copy, else l.source_user_email means source is the original
+    const mySource   = l.user_email;
+    const myOriginal = l.source_user_email
+      ? (l.original_user_email || l.source_user_email)
+      : null;
+    await registerLesson(l.name, mySource, myOriginal);
+    btn.textContent = '✓ Added ' + newWords.length;
+    renderList(); populateLessonSelect();
+    renderAllLessons(lessonsCache);
+  } catch(e) {
+    console.error('copyLesson error:', e);
+    btn.textContent = 'Failed'; btn.disabled = false;
+  }
 }
 
 function toggleEdit(i) {
