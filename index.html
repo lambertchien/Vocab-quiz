@@ -1455,7 +1455,9 @@ async function copyLesson(idx, btn) {
     renderAllLessons(lessonsCache);
   } catch(e) {
     console.error('copyLesson error:', e);
-    btn.textContent = 'Failed'; btn.disabled = false;
+    btn.textContent = 'Failed';
+    btn.title = e.message || 'Unknown error';
+    btn.disabled = false;
   }
 }
 
