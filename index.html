@@ -520,7 +520,8 @@ function normalizeVocab(arr) {
 }
 let vocab = [];
 let deletedWords = [];
-let subscriptions = []; // [{name, ownerUserId, ownerEmail}] — subscribed read-only lessons
+let subscriptions  = []; // [{name, ownerUserId, ownerEmail}] — subscribed read-only lessons
+let subscribedVocab = []; // normalized word objects from subscribed lessons (in-memory only)
 let lessonsCache = [];
 let quizMode = 'chinese';
 let selectedSubsets = new Set();
@@ -594,6 +595,7 @@ function showLoginScreen() {
   vocab = [];
   deletedWords = [];
   subscriptions = [];
+  subscribedVocab = [];
   document.getElementById('main-app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'block';
 }
@@ -885,6 +887,7 @@ function speak(word) {
 function allLessons() {
   const s = new Set();
   vocab.forEach(v => s.add(v.lesson || ''));
+  subscribedVocab.forEach(v => s.add(v.lesson || ''));
   return [...s].sort((a, b) => { if (!a) return 1; if (!b) return -1; return a.localeCompare(b); });
 }
 
@@ -1175,13 +1178,15 @@ CRITICAL: Never use the word "${v.word}" anywhere in either explanation. Reply O
 
 function renderFlashSetup() {
   const lessons = allLessons();
-  if (!flashSubsetInitialized) { lessons.forEach(l => flashSelectedSubsets.add(l)); flashSubsetInitialized = true; }
+  // auto-select any lesson not yet in the set (covers newly subscribed lessons)
+  lessons.forEach(l => { if (!flashSelectedSubsets.has(l)) flashSelectedSubsets.add(l); });
+  if (!flashSubsetInitialized) flashSubsetInitialized = true;
   for (const s of flashSelectedSubsets) { if (!lessons.includes(s)) flashSelectedSubsets.delete(s); }
   const container = document.getElementById('flash-subset-list');
   if (!lessons.length) { container.innerHTML = '<div style="padding:12px 14px;font-size:13px;color:var(--text3)">No words added yet.</div>'; return; }
   container.innerHTML = lessons.map(l => {
     const label = l || 'No lesson';
-    const count = vocab.filter(v => (v.lesson || '') === l).length;
+    const count = [...vocab, ...subscribedVocab].filter(v => (v.lesson || '') === l).length;
     return `<label class="subset-check-row">
       <input type="checkbox" ${flashSelectedSubsets.has(l) ? 'checked' : ''} onchange="toggleFlashSubset('${l.replace(/'/g,"\'")}', this.checked)" />
       <span class="subset-check-label">${label}</span>
@@ -1205,7 +1210,7 @@ function updateFlashSummary() {
   if (el) el.textContent = sel === 0 ? 'No lessons selected' : sel === total ? 'All lessons selected' : sel + ' of ' + total + ' lessons selected';
 }
 function updateFlashPrereq() {
-  const pool = vocab.filter(v => flashSelectedSubsets.has(v.lesson || ''));
+  const pool = [...vocab, ...subscribedVocab].filter(v => flashSelectedSubsets.has(v.lesson || ''));
   const el = document.getElementById('flash-prereq');
   const btn = document.querySelector('#tab-flash .primary');
   if (!el) return;
@@ -1214,7 +1219,7 @@ function updateFlashPrereq() {
 }
 
 function startFlashcards() {
-  const pool = vocab.filter(v => flashSelectedSubsets.has(v.lesson || ''));
+  const pool = [...vocab, ...subscribedVocab].filter(v => flashSelectedSubsets.has(v.lesson || ''));
   if (!pool.length) return;
   fcWords = [...pool].sort(() => Math.random() - 0.5);
   fcIdx = 0; fcPlaying = fcSpeed > 0;
@@ -1471,12 +1476,22 @@ function unsubscribeLesson(ownerUserId, lessonName) {
 async function renderSubscribedLessons() {
   const el = document.getElementById('subscribed-list');
   if (!el) return;
+  subscribedVocab = []; // rebuild from scratch each call
   if (!subscriptions.length || !currentUser) { el.innerHTML = ''; return; }
   el.innerHTML = '<div style="margin-top:6px;padding:6px 2px 4px;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Subscribed lessons (read-only)</div>';
   for (const sub of subscriptions) {
     let rows = [];
     try { rows = await sbFetch('/vocabs?user_id=eq.' + sub.ownerUserId + '&lesson=eq.' + encodeURIComponent(sub.name) + '&deleted=eq.false'); }
     catch(e) { console.warn('fetch subscribed lesson failed:', sub.name, e); }
+    // add to subscribedVocab so quiz/flashcard can use these words
+    rows.forEach(r => subscribedVocab.push({
+      word: r.word, definition: r.definition || '',
+      translation: r.translation || '',
+      synonyms: JSON.parse(r.synonyms || '[]'),
+      antonyms: JSON.parse(r.antonyms || '[]'),
+      lesson: r.lesson || sub.name,
+      correct: 0, wrong: 0, readOnly: true
+    }));
     const safeId = (sub.ownerUserId + '_' + sub.name).replace(/[^a-z0-9]/gi, '_');
     const card = document.createElement('div');
     card.className = 'lesson-card';
@@ -1586,13 +1601,13 @@ function deleteWord(i) {
 ═══════════════════════════════════════════════ */
 function renderSubsetPicker() {
   const lessons = allLessons();
-  if (!subsetInitialized) { /* start with nothing selected — user picks lessons */ subsetInitialized = true; }
+  if (!subsetInitialized) { subsetInitialized = true; }
   for (const s of selectedSubsets) { if (!lessons.includes(s)) selectedSubsets.delete(s); }
   const container = document.getElementById('subset-list');
   if (!lessons.length) { container.innerHTML = '<div style="padding:12px 14px;font-size:13px;color:var(--text3)">No words added yet.</div>'; return; }
   container.innerHTML = lessons.map(l => {
     const label = l || 'No lesson';
-    const count = vocab.filter(v => (v.lesson || '') === l).length;
+    const count = [...vocab, ...subscribedVocab].filter(v => (v.lesson || '') === l).length;
     const safeL = l.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     return `<label class="subset-check-row">
       <input type="checkbox" ${selectedSubsets.has(l) ? 'checked' : ''} onchange="toggleSubset('${safeL}', this.checked)" />
@@ -1611,7 +1626,7 @@ function updateSubsetSummary() {
   document.getElementById('subset-summary').textContent =
     sel === 0 ? 'No lessons selected' : sel === total ? 'All lessons selected' : sel + ' of ' + total + ' lessons selected';
 }
-function selectedPool() { return vocab.filter(v => selectedSubsets.has(v.lesson || '')); }
+function selectedPool() { return [...vocab, ...subscribedVocab].filter(v => selectedSubsets.has(v.lesson || '')); }
 
 function updatePrereq() {
   const prereq = document.getElementById('quiz-prereq');
