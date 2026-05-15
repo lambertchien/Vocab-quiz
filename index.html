@@ -835,16 +835,24 @@ async function syncWithSupabase() {
         subscriptions.push({ name: s.lesson_name, ownerUserId: s.owner_user_id, ownerEmail: s.owner_email });
       }
     }
-    // delete all then re-insert to avoid any conflict
-    await sbFetch('/lesson_subscriptions', { method: 'DELETE', prefer: 'return=minimal' });
+    // deduplicate in case of any stale duplicates in localStorage
+    const seenSubKeys = new Set();
+    subscriptions = subscriptions.filter(s => {
+      const k = s.ownerUserId + ':' + s.name;
+      if (seenSubKeys.has(k)) return false;
+      seenSubKeys.add(k);
+      return true;
+    });
+    // delete all this user's rows (explicit filter to satisfy PostgREST), then reinsert
+    await sbFetch('/lesson_subscriptions?user_id=eq.' + encodeURIComponent(currentUser.id), { method: 'DELETE', prefer: 'return=minimal' });
     if (subscriptions.length) {
       const SUB_CHUNK = 20;
       for (let i = 0; i < subscriptions.length; i += SUB_CHUNK) {
-        await sbFetch('/lesson_subscriptions', { method: 'POST',
+        await sbFetch('/lesson_subscriptions?on_conflict=user_id%2Cowner_user_id%2Clesson_name', { method: 'POST',
           body: JSON.stringify(subscriptions.slice(i, i + SUB_CHUNK).map(s => ({
             user_id: currentUser.id, owner_user_id: s.ownerUserId, lesson_name: s.name, owner_email: s.ownerEmail
           }))),
-          prefer: 'return=minimal'
+          prefer: 'resolution=merge-duplicates,return=minimal'
         });
       }
     }
