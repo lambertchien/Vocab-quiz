@@ -734,8 +734,8 @@ async function syncWithSupabase() {
   const btn = document.getElementById('sync-btn');
   btn.disabled = true; btn.textContent = 'Syncing…';
   try {
-    // fetch ALL remote rows including tombstones
-    const remote = await sbFetch('/vocabs?order=id.asc');
+    // fetch only this user's rows (RLS SELECT is open so other users' rows are visible without a filter)
+    const remote = await sbFetch('/vocabs?user_id=eq.' + encodeURIComponent(currentUser.id) + '&order=id.asc');
     const remoteMap = new Map(remote.map(r => [r.word.toLowerCase(), r]));
     const localWords = new Set(vocab.map(v => v.word.toLowerCase()));
 
