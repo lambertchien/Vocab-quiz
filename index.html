@@ -2036,16 +2036,37 @@ JSON only: {"result":"correct"|"partial"|"wrong","feedback":"..."}`;
   }
 }
 
+// Walk src char-by-char, escaping literal control chars only inside string values
+function fixJsonControlChars(src) {
+  let out = '', inStr = false, esc = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (esc)        { out += ch; esc = false; continue; }
+    if (ch === '\\'){ out += ch; esc = true;  continue; }
+    if (ch === '"') { out += ch; inStr = !inStr; continue; }
+    if (inStr) {
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+    }
+    out += ch;
+  }
+  return out;
+}
+
 function safeParseAI(rawText) {
-  const text = rawText.replace(/```json[\s\S]*?```|```[\s\S]*?```/g, s => s.replace(/```json|```/g, '')).trim();
+  const text = rawText.replace(/```json\s*|\s*```/g, '').trim();
   const match = text.match(/\{[\s\S]*\}/);
   const src = match ? match[0] : text;
+  // Try 1: direct parse
   try { return JSON.parse(src); } catch(_) {}
-  // Literal newlines/tabs inside JSON strings break parse — escape them
-  const fixed = src.replace(/"(?:[^"\\]|\\.)*"/g, s =>
-    s.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
-  );
-  return JSON.parse(fixed);
+  // Try 2: escape literal control characters inside strings
+  try { return JSON.parse(fixJsonControlChars(src)); } catch(_) {}
+  // Try 3: response may be truncated — try closing the open string/object
+  for (const suffix of ['"', '"}', '"}}', '}']) {
+    try { return JSON.parse(fixJsonControlChars(src + suffix)); } catch(_) {}
+  }
+  throw new Error('Could not parse AI response — please try again');
 }
 
 async function callAI(prompt) {
