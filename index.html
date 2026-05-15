@@ -965,7 +965,7 @@ CRITICAL: Never use the word "${word}" anywhere in either explanation. Reply ONL
 
   try {
     const rawText = await callAI(prompt);
-    const parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
+    const parsed = safeParseAI(rawText);
     if (parsed.error) throw new Error(parsed.error);
 
     previewSyns = [];
@@ -1006,7 +1006,7 @@ async function fetchSynAnt() {
 
   try {
     const rawText = await callAI(prompt);
-    const parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
+    const parsed = safeParseAI(rawText);
     previewSyns = parsed.synonyms || [];
     previewAnts = parsed.antonyms || [];
     renderPreviewTags('syn');
@@ -1144,7 +1144,7 @@ CRITICAL: Never use the word "${v.word}" anywhere in either explanation. Reply O
     while (attempts < 3 && !wordDone) {
       try {
         const rawText = await callAI(prompt);
-        const parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
+        const parsed = safeParseAI(rawText);
         if (parsed.definition) v.definition = parsed.definition;
         if (parsed.translation) v.translation = parsed.translation;
         touch(v);
@@ -2023,6 +2023,18 @@ JSON only: {"result":"correct"|"partial"|"wrong","feedback":"..."}`;
   }
 }
 
+function safeParseAI(rawText) {
+  const text = rawText.replace(/```json[\s\S]*?```|```[\s\S]*?```/g, s => s.replace(/```json|```/g, '')).trim();
+  const match = text.match(/\{[\s\S]*\}/);
+  const src = match ? match[0] : text;
+  try { return JSON.parse(src); } catch(_) {}
+  // Literal newlines/tabs inside JSON strings break parse — escape them
+  const fixed = src.replace(/"(?:[^"\\]|\\.)*"/g, s =>
+    s.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
+  );
+  return JSON.parse(fixed);
+}
+
 async function callAI(prompt) {
   const session = (await supabaseClient.auth.getSession()).data.session;
   if (!session) throw new Error('Not signed in');
@@ -2052,7 +2064,7 @@ async function checkAnswerWithAI(v, ans) {
 
   try {
     const rawText = await callAI(prompt);
-    const parsed = JSON.parse(rawText.replace(/```json|```/g, '').trim());
+    const parsed = safeParseAI(rawText);
     const result = parsed.result || 'wrong';
 
     fb.className = 'ai-feedback ' + result;
