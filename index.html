@@ -520,6 +520,7 @@ function normalizeVocab(arr) {
 let vocab = [];
 let deletedWords = [];
 let subscriptions  = []; // [{name, ownerUserId, ownerEmail}] — subscribed read-only lessons
+let deletedSubs    = []; // ["ownerUserId:lessonName"] tombstones for explicitly unsubscribed lessons
 let subscribedVocab = []; // normalized word objects from subscribed lessons (in-memory only)
 let lessonsCache = [];
 let quizMode = 'chinese';
@@ -532,14 +533,17 @@ let previewSyns = [], previewAnts = [];
 // settings
 let AI_PROVIDER = localStorage.getItem('vq_ai_provider') || 'gemini';
 
-function vocabKey()   { return currentUser ? 'vocab_quiz_words_'   + currentUser.id : 'vocab_quiz_words'; }
-function deletedKey() { return currentUser ? 'vocab_quiz_deleted_' + currentUser.id : 'vocab_quiz_deleted'; }
-function subsKey()    { return currentUser ? 'vocab_quiz_subs_'    + currentUser.id : null; }
+function vocabKey()       { return currentUser ? 'vocab_quiz_words_'       + currentUser.id : 'vocab_quiz_words'; }
+function deletedKey()     { return currentUser ? 'vocab_quiz_deleted_'     + currentUser.id : 'vocab_quiz_deleted'; }
+function subsKey()        { return currentUser ? 'vocab_quiz_subs_'        + currentUser.id : null; }
+function deletedSubsKey() { return currentUser ? 'vocab_quiz_deleted_subs_' + currentUser.id : null; }
 function persist() {
   localStorage.setItem(vocabKey(),   JSON.stringify(vocab));
   localStorage.setItem(deletedKey(), JSON.stringify(deletedWords));
   const sk = subsKey();
   if (sk) localStorage.setItem(sk, JSON.stringify(subscriptions));
+  const dsk = deletedSubsKey();
+  if (dsk) localStorage.setItem(dsk, JSON.stringify(deletedSubs));
 }
 function touch(v) {
   v.lastModified = Date.now();
@@ -594,6 +598,7 @@ function showLoginScreen() {
   vocab = [];
   deletedWords = [];
   subscriptions = [];
+  deletedSubs = [];
   subscribedVocab = [];
   document.getElementById('main-app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'block';
@@ -606,6 +611,8 @@ function showMainApp() {
   deletedWords = JSON.parse(localStorage.getItem(deletedKey()) || '[]');
   const sk = subsKey();
   subscriptions = sk ? JSON.parse(localStorage.getItem(sk) || '[]') : [];
+  const dsk = deletedSubsKey();
+  deletedSubs = dsk ? JSON.parse(localStorage.getItem(dsk) || '[]') : [];
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('main-app').style.display = 'block';
@@ -827,11 +834,13 @@ async function syncWithSupabase() {
       });
     }
 
-    // sync subscriptions: merge remote-only subs into local, then replace remote with full local list
+    // sync subscriptions: merge remote-only subs (added on another device) but skip tombstoned ones
     const remoteSubs = await sbFetch('/lesson_subscriptions');
     const localSubKeys = new Set(subscriptions.map(s => s.ownerUserId + ':' + s.name));
+    const deletedSubKeys = new Set(deletedSubs);
     for (const s of remoteSubs) {
-      if (!localSubKeys.has(s.owner_user_id + ':' + s.lesson_name)) {
+      const key = s.owner_user_id + ':' + s.lesson_name;
+      if (!localSubKeys.has(key) && !deletedSubKeys.has(key)) {
         subscriptions.push({ name: s.lesson_name, ownerUserId: s.owner_user_id, ownerEmail: s.owner_email });
       }
     }
@@ -856,6 +865,8 @@ async function syncWithSupabase() {
         });
       }
     }
+    // remote is now authoritative — clear unsubscribe tombstones
+    deletedSubs = [];
 
     persist();
     btn.textContent = '✓ Synced';
@@ -1551,6 +1562,8 @@ function subscribeLesson(idx, btn) {
 function unsubscribeLesson(ownerUserId, lessonName) {
   if (!confirm(`Remove "${lessonName}" from your My Words list?`)) return;
   subscriptions = subscriptions.filter(s => !(s.ownerUserId === ownerUserId && s.name === lessonName));
+  const tombstone = ownerUserId + ':' + lessonName;
+  if (!deletedSubs.includes(tombstone)) deletedSubs.push(tombstone);
   persist(); // saved locally; pushed to Supabase on next sync
   renderSubscribedLessons();
   renderAllLessons(lessonsCache);
