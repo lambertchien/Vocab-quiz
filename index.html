@@ -353,7 +353,6 @@
       <div class="bulk-status" id="bulk-status"></div>
     </div>
     <div id="word-list"></div>
-    <div id="subscribed-list"></div>
     <div style="margin-top:16px;padding-bottom:24px">
       <button onclick="openAllLessons()" id="all-lessons-toggle" style="width:100%;font-size:13px;padding:9px 14px;text-align:left;border:0.5px solid var(--border);border-radius:var(--radius-lg);background:var(--bg2)">🌐 Browse All Lessons ▾</button>
       <div id="all-lessons-panel" style="display:none;border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-top:6px;overflow:hidden">
@@ -1266,54 +1265,61 @@ function renderList() {
   try {
   const el = document.getElementById('word-list');
   if (!el) return;
-  if (!vocab.length) { el.innerHTML = '<div class="empty">No words yet — add some!</div>'; return; }
-  const groups = {};
-  vocab.forEach((v, i) => {
-    const key = v.lesson || '';
-    if (!groups[key]) groups[key] = [];
-    groups[key].push({ v, i });
-  });
-  const sortedKeys = Object.keys(groups).sort((a, b) => { if (!a) return 1; if (!b) return -1; return a.localeCompare(b); });
-  el.innerHTML = sortedKeys.map((key, gi) => {
-    const items = groups[key];
-    return `<div class="lesson-card" id="lc-${gi}">
-      <div class="lesson-card-header" onclick="toggleLesson(${gi})">
-        <div class="lesson-card-title" id="lesson-title-${gi}">${key || 'No lesson'}</div>
-        <div class="lesson-card-meta">
-          <span class="lesson-card-count">${items.length} word${items.length !== 1 ? 's' : ''}</span>
-          ${key ? `<button class="edit-btn" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();startRenameLesson(${gi},'${key.replace(/'/g,"\'")}')" title="Rename lesson">rename</button>` : ''}
-          <button class="del-btn" data-lesson="${key.replace(/"/g,'&quot;')}" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();deleteLesson(this.dataset.lesson)" title="Delete lesson">delete</button>
-          <span class="lesson-card-chevron" id="chev-${gi}">&#9654;</span>
+  if (!vocab.length && !subscribedVocab.length) {
+    el.innerHTML = '<div class="empty">No words yet — add some or subscribe to a lesson below!</div>';
+    return;
+  }
+  let html = '';
+
+  // — Own lessons —
+  if (vocab.length) {
+    const groups = {};
+    vocab.forEach((v, i) => {
+      const key = v.lesson || '';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push({ v, i });
+    });
+    const sortedKeys = Object.keys(groups).sort((a, b) => { if (!a) return 1; if (!b) return -1; return a.localeCompare(b); });
+    html += sortedKeys.map((key, gi) => {
+      const items = groups[key];
+      return `<div class="lesson-card" id="lc-${gi}">
+        <div class="lesson-card-header" onclick="toggleLesson(${gi})">
+          <div class="lesson-card-title" id="lesson-title-${gi}">${key || 'No lesson'}</div>
+          <div class="lesson-card-meta">
+            <span class="lesson-card-count">${items.length} word${items.length !== 1 ? 's' : ''}</span>
+            ${key ? `<button class="edit-btn" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();startRenameLesson(${gi},'${key.replace(/'/g,"\'")}')" title="Rename lesson">rename</button>` : ''}
+            <button class="del-btn" data-lesson="${key.replace(/"/g,'&quot;')}" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();deleteLesson(this.dataset.lesson)" title="Delete lesson">delete</button>
+            <span class="lesson-card-chevron" id="chev-${gi}">&#9654;</span>
+          </div>
         </div>
-      </div>
-      <div id="rename-panel-${gi}" style="display:none;padding:10px 16px;border-top:0.5px solid var(--border);background:var(--bg2)">
-        <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" id="rename-input-${gi}" value="${key}" style="flex:1;font-size:13px;padding:6px 10px" onclick="event.stopPropagation()" />
-          <button onclick="event.stopPropagation();confirmRenameLesson(${gi},'${key.replace(/'/g,"\'")}')" style="font-size:13px;padding:6px 12px" class="primary">Save</button>
-          <button onclick="event.stopPropagation();cancelRenameLesson(${gi})" style="font-size:13px;padding:6px 12px">Cancel</button>
+        <div id="rename-panel-${gi}" style="display:none;padding:10px 16px;border-top:0.5px solid var(--border);background:var(--bg2)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="rename-input-${gi}" value="${key}" style="flex:1;font-size:13px;padding:6px 10px" onclick="event.stopPropagation()" />
+            <button onclick="event.stopPropagation();confirmRenameLesson(${gi},'${key.replace(/'/g,"\'")}')" style="font-size:13px;padding:6px 12px" class="primary">Save</button>
+            <button onclick="event.stopPropagation();cancelRenameLesson(${gi})" style="font-size:13px;padding:6px 12px">Cancel</button>
+          </div>
         </div>
-      </div>
-      <div class="lesson-card-body" id="lcb-${gi}">
-        ${items.map(({ v, i }) => `
-          <div class="word-list-item" id="wli-${i}">
-            <div class="item-header">
-              <div class="item-word-row">
-                <div class="vocab-word">${v.word}</div>
-                <button class="speak-btn" onclick="speak('${v.word.replace(/'/g,"\\'")}');event.stopPropagation()" title="Pronounce">🔊</button>
+        <div class="lesson-card-body" id="lcb-${gi}">
+          ${items.map(({ v, i }) => `
+            <div class="word-list-item" id="wli-${i}">
+              <div class="item-header">
+                <div class="item-word-row">
+                  <div class="vocab-word">${v.word}</div>
+                  <button class="speak-btn" onclick="speak('${v.word.replace(/'/g,"\\'")}');event.stopPropagation()" title="Pronounce">🔊</button>
+                </div>
+                <div class="item-actions">
+                  <button class="edit-btn" onclick="toggleEdit(${i})">edit</button>
+                  <button class="del-btn" onclick="deleteWord(${i})">remove</button>
+                </div>
               </div>
-              <div class="item-actions">
-                <button class="edit-btn" onclick="toggleEdit(${i})">edit</button>
-                <button class="del-btn" onclick="deleteWord(${i})">remove</button>
+              <div class="vocab-def" style="white-space:pre-line">${String(v.definition||'')}</div>
+              <div class="vocab-tags" style="margin-top:6px">
+                ${v.translation ? `<span class="tag zh" title="${String(v.translation||'')}">ZH: ${String(v.translation||'').length > 20 ? String(v.translation||'').slice(0,20) + "…" : String(v.translation||'')} </span>` : ''}
+                ${(v.synonyms||[]).map(s=>`<span class="tag syn">= ${s}</span>`).join('')}
+                ${(v.antonyms||[]).map(a=>`<span class="tag ant">≠ ${a}</span>`).join('')}
               </div>
-            </div>
-            <div class="vocab-def" style="white-space:pre-line">${String(v.definition||'')}</div>
-            <div class="vocab-tags" style="margin-top:6px">
-              ${v.translation ? `<span class="tag zh" title="${String(v.translation||'')}">ZH: ${String(v.translation||'').length > 20 ? String(v.translation||'').slice(0,20) + "…" : String(v.translation||'')} </span>` : ''}
-              ${(v.synonyms||[]).map(s=>`<span class="tag syn">= ${s}</span>`).join('')}
-              ${(v.antonyms||[]).map(a=>`<span class="tag ant">≠ ${a}</span>`).join('')}
-            </div>
-            <div class="item-stats">Correct: <b>${v.correct||0}</b> &nbsp; Wrong: <b>${v.wrong||0}</b></div>
-            <div class="edit-panel" id="ep-${i}" style="display:none">
+              <div class="item-stats">Correct: <b>${v.correct||0}</b> &nbsp; Wrong: <b>${v.wrong||0}</b></div>
+              <div class="edit-panel" id="ep-${i}" style="display:none">
               <div class="field-label" style="margin-top:0">Move to lesson</div>
               <div style="display:flex;gap:8px;align-items:center">
                 <select id="ep-lesson-${i}" style="flex:1"></select>
@@ -1341,10 +1347,62 @@ function renderList() {
                 <button onclick="toggleEdit(${i})">Cancel</button>
               </div>
             </div>
+            </div>
           </div>`).join('')}
-      </div>
-    </div>`;
-  }).join('');
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // — Subscribed lessons (read-only) —
+  if (subscribedVocab.length) {
+    const subGroups = {};
+    subscribedVocab.forEach(v => {
+      const key = v.lesson || '';
+      if (!subGroups[key]) subGroups[key] = { words: [], ownerUserId: v.ownerUserId, ownerEmail: v.ownerEmail };
+      subGroups[key].words.push(v);
+    });
+    const subKeys = Object.keys(subGroups).sort((a, b) => { if (!a) return 1; if (!b) return -1; return a.localeCompare(b); });
+    if (vocab.length) html += '<div style="margin:10px 0 4px;padding:4px 2px;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Subscribed (read-only)</div>';
+    html += subKeys.map((key, si) => {
+      const { words, ownerUserId, ownerEmail } = subGroups[key];
+      return `<div class="lesson-card">
+        <div class="lesson-card-header" onclick="toggleLesson('s${si}')">
+          <div>
+            <div class="lesson-card-title">${key || 'No lesson'}</div>
+            <div style="font-size:11px;color:var(--text3)">by ${shortEmail(ownerEmail)}</div>
+          </div>
+          <div class="lesson-card-meta">
+            <span class="lesson-card-count">${words.length} word${words.length !== 1 ? 's' : ''}</span>
+            <button class="del-btn" style="font-size:11px;padding:2px 7px"
+              data-owner="${ownerUserId}" data-lesson="${key.replace(/"/g,'&quot;')}"
+              onclick="event.stopPropagation();unsubscribeLesson(this.dataset.owner,this.dataset.lesson)">remove</button>
+            <span class="lesson-card-chevron" id="chev-s${si}">&#9654;</span>
+          </div>
+        </div>
+        <div class="lesson-card-body" id="lcb-s${si}">
+          ${words.map(v => `
+            <div class="word-list-item">
+              <div class="item-header">
+                <div class="item-word-row">
+                  <div class="vocab-word">${v.word}</div>
+                  <button class="speak-btn" onclick="speak('${v.word.replace(/'/g,"\\'")}');event.stopPropagation()" title="Pronounce">🔊</button>
+                </div>
+              </div>
+              <div class="vocab-def" style="white-space:pre-line">${String(v.definition||'')}</div>
+              <div class="vocab-tags" style="margin-top:6px">
+                ${v.translation ? `<span class="tag zh">ZH: ${String(v.translation).length>20?String(v.translation).slice(0,20)+'…':String(v.translation)}</span>` : ''}
+                ${(v.synonyms||[]).map(s=>`<span class="tag syn">= ${s}</span>`).join('')}
+                ${(v.antonyms||[]).map(a=>`<span class="tag ant">≠ ${a}</span>`).join('')}
+              </div>
+              <div class="item-stats">Correct: <b>${v.correct||0}</b> &nbsp; Wrong: <b>${v.wrong||0}</b></div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  el.innerHTML = html;
   } catch(e) { console.error('renderList error:', e); }
 }
 
@@ -1397,6 +1455,30 @@ async function fetchAllLessons() {
   } catch(e) { console.warn('fetchAllLessons failed:', e); return []; }
 }
 
+async function toggleLessonPreview(idx, btn) {
+  const el = document.getElementById('lesson-preview-' + idx);
+  if (!el) return;
+  if (el.style.display !== 'none') {
+    el.style.display = 'none';
+    btn.textContent = '▾ words';
+    return;
+  }
+  el.style.display = 'block';
+  btn.textContent = '▴ hide';
+  if (el.dataset.loaded) return;
+  el.innerHTML = '<span style="color:var(--text3)">Loading…</span>';
+  const l = lessonsCache[idx];
+  if (!l) { el.textContent = 'Not found.'; return; }
+  try {
+    const rows = await sbFetch('/vocabs?user_id=eq.' + l.user_id + '&lesson=eq.' + encodeURIComponent(l.name) + '&deleted=eq.false&select=word');
+    el.dataset.loaded = '1';
+    el.textContent = rows.length ? rows.map(r => r.word).join(' · ') : 'No words yet.';
+  } catch(e) {
+    el.textContent = 'Failed to load.';
+    console.warn('toggleLessonPreview error:', e);
+  }
+}
+
 function shortEmail(email) {
   if (!email) return '';
   return email.length > 24 ? email.slice(0, 20) + '…' : email;
@@ -1412,17 +1494,22 @@ function renderAllLessons(lessons) {
   el.innerHTML = lessons.map((l, idx) => {
     const isOwn = l.user_id === currentUser?.id;
     const subscribed = subscriptions.some(s => s.ownerUserId === l.user_id && s.name === l.name);
-    const addBtn = isOwn ? '<span style="font-size:11px;color:var(--text3)">yours</span>' :
+    const addBtn = isOwn ? '<span style="font-size:11px;color:var(--text3);flex-shrink:0">yours</span>' :
       `<button style="font-size:11px;padding:4px 10px;flex-shrink:0;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:${subscribed?'default':'pointer'}"
         ${subscribed ? 'disabled' : ''} onclick="subscribeLesson(${idx},this)">
         ${subscribed ? '✓ Added' : '+ Add'}
       </button>`;
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:0.5px solid var(--border);gap:10px">
-      <div style="flex:1;min-width:0;overflow:hidden">
-        <div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.name}</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px">by ${shortEmail(l.user_email)}</div>
+    return `<div style="border-bottom:0.5px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;gap:8px">
+        <div style="flex:1;min-width:0;overflow:hidden">
+          <div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.name}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">by ${shortEmail(l.user_email)}</div>
+        </div>
+        <button style="font-size:11px;color:var(--text3);background:none;border:0.5px solid var(--border);border-radius:4px;padding:3px 7px;cursor:pointer;flex-shrink:0"
+          onclick="toggleLessonPreview(${idx},this)">▾ words</button>
+        ${addBtn}
       </div>
-      ${addBtn}
+      <div id="lesson-preview-${idx}" style="display:none;padding:4px 14px 10px;font-size:12px;color:var(--text2);word-break:break-word"></div>
     </div>`;
   }).join('');
 }
@@ -1474,66 +1561,24 @@ function unsubscribeLesson(ownerUserId, lessonName) {
 }
 
 async function renderSubscribedLessons() {
-  const el = document.getElementById('subscribed-list');
-  if (!el) return;
-  subscribedVocab = []; // rebuild from scratch each call
-  if (!subscriptions.length || !currentUser) { el.innerHTML = ''; return; }
-  el.innerHTML = '<div style="margin-top:6px;padding:6px 2px 4px;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px">Subscribed lessons (read-only)</div>';
-  for (const sub of subscriptions) {
-    let rows = [];
-    try { rows = await sbFetch('/vocabs?user_id=eq.' + sub.ownerUserId + '&lesson=eq.' + encodeURIComponent(sub.name) + '&deleted=eq.false'); }
-    catch(e) { console.warn('fetch subscribed lesson failed:', sub.name, e); }
-    // add to subscribedVocab so quiz/flashcard can use these words
-    rows.forEach(r => subscribedVocab.push({
-      word: r.word, definition: r.definition || '',
-      translation: r.translation || '',
-      synonyms: JSON.parse(r.synonyms || '[]'),
-      antonyms: JSON.parse(r.antonyms || '[]'),
-      lesson: r.lesson || sub.name,
-      correct: 0, wrong: 0, readOnly: true
-    }));
-    const safeId = (sub.ownerUserId + '_' + sub.name).replace(/[^a-z0-9]/gi, '_');
-    const card = document.createElement('div');
-    card.className = 'lesson-card';
-    card.innerHTML = `
-      <div class="lesson-card-header" onclick="toggleSubscribedLesson('${safeId}')">
-        <div>
-          <div class="lesson-card-title">${sub.name}</div>
-          <div style="font-size:11px;color:var(--text3)">by ${shortEmail(sub.ownerEmail)}</div>
-        </div>
-        <div class="lesson-card-meta">
-          <span class="lesson-card-count">${rows.length} word${rows.length !== 1 ? 's' : ''}</span>
-          <button class="del-btn" style="font-size:11px;padding:2px 7px"
-            data-owner="${sub.ownerUserId}" data-lesson="${sub.name.replace(/"/g,'&quot;')}"
-            onclick="event.stopPropagation();unsubscribeLesson(this.dataset.owner,this.dataset.lesson)">remove</button>
-          <span class="lesson-card-chevron" id="schev-${safeId}">&#9654;</span>
-        </div>
-      </div>
-      <div class="lesson-card-body" id="slcb-${safeId}">
-        ${rows.length ? rows.map(r => `
-          <div class="word-list-item">
-            <div class="item-header">
-              <div class="item-word-row">
-                <div class="vocab-word">${r.word}</div>
-                <button class="speak-btn" onclick="speak('${r.word.replace(/'/g,"\\'")}');event.stopPropagation()" title="Pronounce">🔊</button>
-              </div>
-            </div>
-            <div class="vocab-def" style="white-space:pre-line">${String(r.definition||'')}</div>
-            <div class="vocab-tags" style="margin-top:6px">
-              ${r.translation ? `<span class="tag zh">ZH: ${String(r.translation).length>20?String(r.translation).slice(0,20)+'…':String(r.translation)}</span>` : ''}
-              ${JSON.parse(r.synonyms||'[]').map(s=>`<span class="tag syn">= ${s}</span>`).join('')}
-              ${JSON.parse(r.antonyms||'[]').map(a=>`<span class="tag ant">≠ ${a}</span>`).join('')}
-            </div>
-          </div>`).join('') : '<div style="padding:12px 16px;font-size:13px;color:var(--text3)">No words found.</div>'}
-      </div>`;
-    el.appendChild(card);
+  subscribedVocab = [];
+  if (subscriptions.length && currentUser) {
+    for (const sub of subscriptions) {
+      let rows = [];
+      try { rows = await sbFetch('/vocabs?user_id=eq.' + sub.ownerUserId + '&lesson=eq.' + encodeURIComponent(sub.name) + '&deleted=eq.false'); }
+      catch(e) { console.warn('fetch subscribed lesson failed:', sub.name, e); }
+      rows.forEach(r => subscribedVocab.push({
+        word: r.word, definition: r.definition || '',
+        translation: r.translation || '',
+        synonyms: JSON.parse(r.synonyms || '[]'),
+        antonyms: JSON.parse(r.antonyms || '[]'),
+        lesson: r.lesson || sub.name,
+        correct: 0, wrong: 0, readOnly: true,
+        ownerUserId: sub.ownerUserId, ownerEmail: sub.ownerEmail
+      }));
+    }
   }
-}
-
-function toggleSubscribedLesson(safeId) {
-  const body = document.getElementById('slcb-' + safeId);
-  const chev = document.getElementById('schev-' + safeId);
-  if (body) chev.classList.toggle('open', body.classList.toggle('open'));
+  renderList();
 }
 
 function toggleEdit(i) {
