@@ -12,7 +12,7 @@ const DAILY_LIMIT   = 150; // max AI calls per user per day
 // ─── CORS headers (Supabase Edge Functions need these for browser calls) ───
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Headers": "authorization, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 // ─── main ──────────────────────────────────────────────────────────────────
