@@ -27,27 +27,29 @@ Deno.serve(async (req) => {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt);
   if (authErr || !user) return err("Invalid token", 401);
 
-  // 2. Daily rate limit
-  const today = new Date().toISOString().slice(0, 10);
-  const { data: usage } = await supabase
-    .from("ai_usage")
-    .select("count")
-    .eq("user_id", user.id)
-    .eq("date", today)
-    .maybeSingle();
-
-  const currentCount = usage?.count ?? 0;
-  if (currentCount >= DAILY_LIMIT) {
-    return err(`Daily AI limit of ${DAILY_LIMIT} calls reached`, 429);
-  }
-
-  await supabase.from("ai_usage").upsert(
-    { user_id: user.id, date: today, count: currentCount + 1 },
-    { onConflict: "user_id,date" },
-  );
-
-  // 4. Parse request body
+  // 2. Parse request body
   const { provider, prompt } = await req.json();
+
+  // 3. Daily rate limit (best-effort — if ai_usage table missing, still allow the call)
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: usage } = await supabase
+      .from("ai_usage")
+      .select("count")
+      .eq("user_id", user.id)
+      .eq("date", today)
+      .maybeSingle();
+
+    const currentCount = usage?.count ?? 0;
+    if (currentCount >= DAILY_LIMIT) {
+      return err(`Daily AI limit of ${DAILY_LIMIT} calls reached`, 429);
+    }
+
+    await supabase.from("ai_usage").upsert(
+      { user_id: user.id, date: today, count: currentCount + 1 },
+      { onConflict: "user_id,date" },
+    );
+  } catch (_) { /* rate limit table not ready — allow the call */ }
 
   // 5. Forward to chosen AI provider
   if (provider === "gemini") {
