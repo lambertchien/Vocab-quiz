@@ -2133,7 +2133,7 @@ async function callAI(prompt) {
   if (!session) throw new Error('Not signed in');
   const res = await fetch(SUPABASE_URL + '/functions/v1/ai-proxy', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
     body: JSON.stringify({ provider: AI_PROVIDER, prompt, token: session.access_token })
   });
   const data = await res.json();
