@@ -1530,7 +1530,7 @@ async function loadAllLessonPreviews(lessons) {
       previewEl.textContent = rows.length ? rows.map(r => r.word).join(' · ') : 'No words yet.';
     } catch(e) {
       previewEl.textContent = 'Failed to load.';
-    console.warn('toggleLessonPreview error:', e);
+    }
   }
 }
 
