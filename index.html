@@ -1518,26 +1518,18 @@ async function fetchAllLessons() {
   } catch(e) { console.warn('fetchAllLessons failed:', e); return []; }
 }
 
-async function toggleLessonPreview(idx, btn) {
-  const el = document.getElementById('lesson-preview-' + idx);
-  if (!el) return;
-  if (el.style.display !== 'none') {
-    el.style.display = 'none';
-    btn.textContent = '▾ words';
-    return;
-  }
-  el.style.display = 'block';
-  btn.textContent = '▴ hide';
-  if (el.dataset.loaded) return;
-  el.innerHTML = '<span style="color:var(--text3)">Loading…</span>';
-  const l = lessonsCache[idx];
-  if (!l) { el.textContent = 'Not found.'; return; }
-  try {
-    const rows = await sbFetch('/vocabs?user_id=eq.' + l.user_id + '&lesson=eq.' + encodeURIComponent(l.name) + '&deleted=eq.false&select=word');
-    el.dataset.loaded = '1';
-    el.textContent = rows.length ? rows.map(r => r.word).join(' · ') : 'No words yet.';
-  } catch(e) {
-    el.textContent = 'Failed to load.';
+async function loadAllLessonPreviews(lessons) {
+  for (let idx = 0; idx < lessons.length; idx++) {
+    const l = lessons[idx];
+    const previewEl = document.getElementById('lesson-preview-' + idx);
+    const countEl   = document.getElementById('lesson-count-'   + idx);
+    if (!previewEl) continue;
+    try {
+      const rows = await sbFetch('/vocabs?user_id=eq.' + l.user_id + '&lesson=eq.' + encodeURIComponent(l.name) + '&deleted=eq.false&select=word');
+      if (countEl) countEl.textContent = rows.length + ' word' + (rows.length !== 1 ? 's' : '');
+      previewEl.textContent = rows.length ? rows.map(r => r.word).join(' · ') : 'No words yet.';
+    } catch(e) {
+      previewEl.textContent = 'Failed to load.';
     console.warn('toggleLessonPreview error:', e);
   }
 }
@@ -1569,16 +1561,16 @@ function renderAllLessons(lessons) {
     return `<div style="border-bottom:0.5px solid var(--border)">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;gap:8px">
         <div style="flex:1;min-width:0;overflow:hidden">
-          <div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.name}</div>
+          <div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(l.name)}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">by ${shortEmail(l.user_email)}</div>
         </div>
-        <button style="font-size:11px;color:var(--text3);background:none;border:0.5px solid var(--border);border-radius:4px;padding:3px 7px;cursor:pointer;flex-shrink:0"
-          onclick="toggleLessonPreview(${idx},this)">▾ words</button>
+        <span id="lesson-count-${idx}" style="font-size:11px;color:var(--text3);flex-shrink:0"></span>
         ${addBtn}
       </div>
-      <div id="lesson-preview-${idx}" style="display:none;padding:4px 14px 10px;font-size:12px;color:var(--text2);word-break:break-word"></div>
+      <div id="lesson-preview-${idx}" style="padding:0 14px 10px;font-size:12px;color:var(--text2);word-break:break-word"><span style="color:var(--text3)">Loading…</span></div>
     </div>`;
   }).join('');
+  loadAllLessonPreviews(lessons);
 }
 
 async function openAllLessons() {
