@@ -19,16 +19,16 @@ const CORS = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
-  // 1. Verify caller is logged in
-  const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
-  if (!jwt) return err("Not authenticated", 401);
+  // 1. Parse request body first (token is in the body, not header)
+  const { provider, prompt, token } = await req.json();
+  if (!token) return err("Not authenticated", 401);
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, // server-side key, never in browser
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt);
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) return err("Invalid token", 401);
 
   // 2. Allowlist check — only approved emails can use your AI budget
@@ -54,9 +54,6 @@ Deno.serve(async (req) => {
     { user_id: user.id, date: today, count: currentCount + 1 },
     { onConflict: "user_id,date" },
   );
-
-  // 4. Parse request body
-  const { provider, prompt } = await req.json();
 
   // 5. Forward to chosen AI provider
   if (provider === "gemini") {
