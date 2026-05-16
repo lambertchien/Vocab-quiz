@@ -1500,9 +1500,11 @@ async function deleteLesson(lessonName) {
   subsetInitialized = false;
   persist(); renderList(); populateLessonSelect();
   if (currentUser) {
-    if (lessonName) sbFetch('/lessons?name=eq.' + encodeURIComponent(lessonName),
+    if (lessonName) sbFetch(
+      '/lessons?user_id=eq.' + encodeURIComponent(currentUser.id) + '&name=eq.' + encodeURIComponent(lessonName),
       { method: 'DELETE', prefer: 'return=minimal' }).catch(() => {});
-    words.forEach(w => sbFetch('/vocabs?word=eq.' + encodeURIComponent(w.word),
+    words.forEach(w => sbFetch(
+      '/vocabs?user_id=eq.' + encodeURIComponent(currentUser.id) + '&word=eq.' + encodeURIComponent(w.word),
       { method: 'PATCH', body: JSON.stringify({ deleted: true }), prefer: 'return=minimal' }
     ).catch(() => {}));
   }
