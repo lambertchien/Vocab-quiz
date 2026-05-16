@@ -8,6 +8,8 @@ const ALLOWED_EMAILS = (Deno.env.get("ALLOWED_EMAILS") ?? "")
 const GEMINI_KEY    = Deno.env.get("GEMINI_KEY") ?? "";
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_KEY") ?? "";
 const DAILY_LIMIT   = 150; // max AI calls per user per day
+const GEMINI_URL    = "https://generativelanguage.googleapis.com"
+  + "/v1beta/models/gemini-2.5-flash:generateContent";
 
 // ─── CORS headers (Supabase Edge Functions need these for browser calls) ───
 const CORS = {
@@ -18,6 +20,11 @@ const CORS = {
 // ─── main ──────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+
+  // Read body immediately — must happen before any other awaits
+  const bodyText = await req.text();
+  let body: { provider?: string; prompt?: string } = {};
+  try { body = JSON.parse(bodyText); } catch { return err("Invalid JSON body", 400); }
 
   // 1. Verify caller is logged in
   const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
@@ -55,13 +62,12 @@ Deno.serve(async (req) => {
     { onConflict: "user_id,date" },
   );
 
-  // 4. Parse request body
-  const { provider, prompt } = await req.json();
+  const { provider, prompt } = body;
 
   // 5. Forward to chosen AI provider
   if (provider === "gemini") {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+      GEMINI_URL + "?key=" + GEMINI_KEY,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -71,9 +77,12 @@ Deno.serve(async (req) => {
         }),
       },
     );
-    const data = await res.json();
-    if (data.error) return err(data.error.message, 502);
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const raw = await res.text();
+    console.log("gemini status:", res.status, "| key length:", GEMINI_KEY.length, "| body:", raw.slice(0, 300));
+    let data: Record<string, unknown>;
+    try { data = JSON.parse(raw); } catch { return err("Gemini non-JSON: " + raw.slice(0, 200), 502); }
+    if (data.error) return err((data.error as { message: string }).message, 502);
+    const text = (data.candidates as Array<{content:{parts:Array<{text?:string}>}}>)?.[0]?.content?.parts?.[0]?.text ?? "";
     return ok({ text });
   }
 
@@ -91,9 +100,12 @@ Deno.serve(async (req) => {
         messages: [{ role: "user", content: prompt }],
       }),
     });
-    const data = await res.json();
-    if (data.error) return err(data.error.message, 502);
-    const text = data.content?.map((c: { text?: string }) => c.text ?? "").join("") ?? "";
+    const raw = await res.text();
+    console.log("anthropic status:", res.status, "| body:", raw.slice(0, 300));
+    let data: Record<string, unknown>;
+    try { data = JSON.parse(raw); } catch { return err("Anthropic non-JSON: " + raw.slice(0, 200), 502); }
+    if (data.error) return err((data.error as { message: string }).message, 502);
+    const text = (data.content as Array<{text?:string}>)?.map((c) => c.text ?? "").join("") ?? "";
     return ok({ text });
   }
 
