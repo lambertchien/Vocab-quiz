@@ -1,10 +1,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 // ─── config ────────────────────────────────────────────────────────────────
-// Set these via: supabase secrets set ALLOWED_EMAILS="a@x.com,b@x.com"
-const ALLOWED_EMAILS = (Deno.env.get("ALLOWED_EMAILS") ?? "")
-  .split(",").map(e => e.trim()).filter(Boolean);
-
 const GEMINI_KEY    = Deno.env.get("GEMINI_KEY") ?? "";
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_KEY") ?? "";
 const DAILY_LIMIT   = 150; // max AI calls per user per day
@@ -31,12 +27,7 @@ Deno.serve(async (req) => {
   const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt);
   if (authErr || !user) return err("Invalid token", 401);
 
-  // 2. Allowlist check — only approved emails can use your AI budget
-  if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(user.email!)) {
-    return err("Not authorised", 403);
-  }
-
-  // 3. Daily rate limit
+  // 2. Daily rate limit
   const today = new Date().toISOString().slice(0, 10);
   const { data: usage } = await supabase
     .from("ai_usage")
