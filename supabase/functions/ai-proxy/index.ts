@@ -12,26 +12,24 @@ const DAILY_LIMIT   = 150; // max AI calls per user per day
 // ─── CORS headers (Supabase Edge Functions need these for browser calls) ───
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, content-type",
 };
 
 // ─── main ──────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
+  // 1. Verify caller is logged in
   const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
   if (!jwt) return err("Not authenticated", 401);
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, // server-side key, never in browser
   );
 
   const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt);
   if (authErr || !user) return err("Invalid token", 401);
-
-  // 1. Parse request body
-  const { provider, prompt } = await req.json();
 
   // 2. Allowlist check — only approved emails can use your AI budget
   if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(user.email!)) {
@@ -56,6 +54,9 @@ Deno.serve(async (req) => {
     { user_id: user.id, date: today, count: currentCount + 1 },
     { onConflict: "user_id,date" },
   );
+
+  // 4. Parse request body
+  const { provider, prompt } = await req.json();
 
   // 5. Forward to chosen AI provider
   if (provider === "gemini") {
