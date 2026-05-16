@@ -19,17 +19,19 @@ const CORS = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
-  // 1. Parse request body first (token is in the body, not header)
-  const { provider, prompt, token } = await req.json();
-  if (!token) return err("Not authenticated", 401);
+  const jwt = req.headers.get("Authorization")?.replace("Bearer ", "");
+  if (!jwt) return err("Not authenticated", 401);
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt);
   if (authErr || !user) return err("Invalid token", 401);
+
+  // 1. Parse request body
+  const { provider, prompt } = await req.json();
 
   // 2. Allowlist check — only approved emails can use your AI budget
   if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(user.email!)) {

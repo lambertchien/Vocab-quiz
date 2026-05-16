@@ -2131,14 +2131,12 @@ function safeParseAI(rawText) {
 async function callAI(prompt) {
   const session = (await supabaseClient.auth.getSession()).data.session;
   if (!session) throw new Error('Not signed in');
-  const res = await fetch(SUPABASE_URL + '/functions/v1/ai-proxy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
-    body: JSON.stringify({ provider: AI_PROVIDER, prompt, token: session.access_token })
+  const { data, error } = await supabaseClient.functions.invoke('ai-proxy', {
+    body: { provider: AI_PROVIDER, prompt }
   });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
-  return data.text;
+  if (error) throw new Error(error.message);
+  if (data?.error) throw new Error(data.error);
+  return data?.text;
 }
 
 async function checkAnswerWithAI(v, ans) {
