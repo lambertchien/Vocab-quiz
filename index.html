@@ -607,6 +607,8 @@ function showLoginScreen() {
 }
 
 function showMainApp() {
+  // Reset cached data so a previous user's data never leaks into the new session
+  lessonsCache = [];
   // Load this user's data from their own localStorage keys
   const stored = localStorage.getItem(vocabKey());
   vocab = stored ? normalizeVocab(JSON.parse(stored)) : [];
@@ -866,6 +868,10 @@ async function syncWithSupabase() {
     }
     // remote is now authoritative — clear unsubscribe tombstones
     deletedSubs = [];
+
+    // re-register all lessons so lessons table has correct user_id and current email
+    const syncedLessonNames = [...new Set(vocab.map(v => v.lesson).filter(Boolean))];
+    for (const name of syncedLessonNames) { await registerLesson(name); }
 
     persist();
     btn.textContent = '✓ Synced';
