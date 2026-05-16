@@ -29,7 +29,10 @@ Deno.serve(async (req) => {
     if (authErr || !user) return err("Invalid token", 401);
 
     // 2. Parse request body
-    const { provider, prompt } = await req.json();
+    const bodyText = await req.text();
+    console.log("body length:", bodyText.length, "| first 100:", bodyText.slice(0, 100));
+    if (!bodyText) return err("Empty request body", 400);
+    const { provider, prompt } = JSON.parse(bodyText);
 
     // 3. Daily rate limit (best-effort — if ai_usage table missing, still allow the call)
     try {
@@ -53,6 +56,8 @@ Deno.serve(async (req) => {
     } catch (_) { /* rate limit table not ready — allow the call */ }
 
     // 4. Forward to chosen AI provider
+    console.log("provider:", provider, "| prompt length:", prompt?.length);
+
     if (provider === "gemini") {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
@@ -65,7 +70,9 @@ Deno.serve(async (req) => {
           }),
         },
       );
-      const data = await res.json();
+      const geminiText = await res.text();
+      console.log("gemini status:", res.status, "| response:", geminiText.slice(0, 200));
+      const data = JSON.parse(geminiText);
       if (data.error) return err(data.error.message, 502);
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
       return ok({ text });
