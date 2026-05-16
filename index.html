@@ -1518,7 +1518,7 @@ function renderAllLessons(lessons) {
     const isOwn = l.user_id === currentUser?.id;
     const subscribed = subscriptions.some(s => s.ownerUserId === l.user_id && s.name === l.name);
     const addBtn = isOwn ? '<span style="font-size:11px;color:var(--text3);flex-shrink:0">yours</span>' :
-      `<button style="font-size:11px;padding:4px 10px;flex-shrink:0;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:${subscribed?'default':'pointer'}"
+      `<button style="font-size:11px;padding:4px 10px;flex-shrink:0;background:var(--text);color:var(--bg);border:none;border-radius:6px;cursor:${subscribed?'default':'pointer'}"
         ${subscribed ? 'disabled' : ''} onclick="subscribeLesson(${idx},this)">
         ${subscribed ? '✓ Added' : '+ Add'}
       </button>`;
