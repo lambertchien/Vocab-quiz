@@ -24,13 +24,6 @@ const CORS = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
-  // Temporary: GET /ai-proxy lists available Gemini models
-  if (req.method === "GET") {
-    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=" + GEMINI_KEY);
-    const d = await r.json();
-    const names = (d.models ?? []).map((m: {name:string}) => m.name);
-    return new Response(JSON.stringify(names, null, 2), { headers: { ...CORS, "Content-Type": "application/json" } });
-  }
 
   // Read body immediately — must happen before any other awaits
   const bodyText = await req.text();
