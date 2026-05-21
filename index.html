@@ -160,7 +160,7 @@
   .subset-check-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 0.5px solid var(--border); cursor: pointer; transition: background 0.1s; }
   .subset-check-row:last-child { border-bottom: none; }
   .subset-check-row:hover { background: var(--bg2); }
-  .subset-check-row input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--text); flex-shrink: 0; }
+  .subset-check-row input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color: #3b82f6; flex-shrink: 0; }
   .subset-check-label { font-size: 14px; color: var(--text); flex: 1; }
   .subset-check-count { font-size: 12px; color: var(--text3); }
   .start-btn { width: 100%; margin-bottom: 8px; }
@@ -1112,7 +1112,6 @@ function clearPreview() {
 ═══════════════════════════════════════════════ */
 let bulkSelectedLessons = new Set();
 let flashSelectedSubsets = new Set();
-let flashSubsetInitialized = false;
 let bulkRunning = false;
 let bulkStop = false;
 
@@ -1228,9 +1227,6 @@ CRITICAL: Never use the word "${v.word}" anywhere in either explanation. Reply O
 
 function renderFlashSetup() {
   const lessons = allLessons();
-  // auto-select any lesson not yet in the set (covers newly subscribed lessons)
-  lessons.forEach(l => { if (!flashSelectedSubsets.has(l)) flashSelectedSubsets.add(l); });
-  if (!flashSubsetInitialized) flashSubsetInitialized = true;
   for (const s of flashSelectedSubsets) { if (!lessons.includes(s)) flashSelectedSubsets.delete(s); }
   const container = document.getElementById('flash-subset-list');
   if (!lessons.length) { container.innerHTML = '<div style="padding:12px 14px;font-size:13px;color:var(--text3)">No words added yet.</div>'; return; }

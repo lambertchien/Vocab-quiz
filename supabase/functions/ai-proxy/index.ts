@@ -8,8 +8,13 @@ const ALLOWED_EMAILS = (Deno.env.get("ALLOWED_EMAILS") ?? "")
 const GEMINI_KEY    = Deno.env.get("GEMINI_KEY") ?? "";
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_KEY") ?? "";
 const DAILY_LIMIT   = 150; // max AI calls per user per day
-const GEMINI_URL    = "https://generativelanguage.googleapis.com"
-  + "/v1beta/models/gemini-2.5-flash:generateContent";
+const GEMINI_BASE   = "https://generativelanguage.googleapis.com/v1beta/models/";
+// Fallback chain: try each model in order when previous is overloaded
+const GEMINI_MODELS = [
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+];
 
 // ─── CORS headers (Supabase Edge Functions need these for browser calls) ───
 const CORS = {
@@ -66,24 +71,34 @@ Deno.serve(async (req) => {
 
   // 5. Forward to chosen AI provider
   if (provider === "gemini") {
-    const res = await fetch(
-      GEMINI_URL + "?key=" + GEMINI_KEY,
-      {
+    const reqBody = JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
+    });
+    let lastError = "All Gemini models busy";
+    for (const model of GEMINI_MODELS) {
+      const url = GEMINI_BASE + model + ":generateContent?key=" + GEMINI_KEY;
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
-        }),
-      },
-    );
-    const raw = await res.text();
-    console.log("gemini status:", res.status, "| key length:", GEMINI_KEY.length, "| body:", raw.slice(0, 300));
-    let data: Record<string, unknown>;
-    try { data = JSON.parse(raw); } catch { return err("Gemini non-JSON: " + raw.slice(0, 200), 502); }
-    if (data.error) return err((data.error as { message: string }).message, 502);
-    const text = (data.candidates as Array<{content:{parts:Array<{text?:string}>}}>)?.[0]?.content?.parts?.[0]?.text ?? "";
-    return ok({ text });
+        body: reqBody,
+      });
+      const raw = await res.text();
+      console.log("gemini model:", model, "| status:", res.status, "| body:", raw.slice(0, 200));
+      let data: Record<string, unknown>;
+      try { data = JSON.parse(raw); } catch { lastError = "Gemini non-JSON: " + raw.slice(0, 100); continue; }
+      const e = data.error as { code?: number; status?: string; message?: string } | undefined;
+      if (e) {
+        // Retry with next model if overloaded or rate-limited
+        if (e.status === "UNAVAILABLE" || e.status === "RESOURCE_EXHAUSTED" || e.code === 503 || e.code === 429) {
+          lastError = e.message ?? lastError; continue;
+        }
+        return err(e.message ?? "Gemini error", 502);
+      }
+      const text = (data.candidates as Array<{content:{parts:Array<{text?:string}>}}>)?.[0]?.content?.parts?.[0]?.text ?? "";
+      return ok({ text });
+    }
+    return err(lastError, 503);
   }
 
   if (provider === "anthropic") {
