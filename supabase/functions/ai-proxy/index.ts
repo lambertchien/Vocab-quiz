@@ -11,9 +11,7 @@ const DAILY_LIMIT   = 150; // max AI calls per user per day
 const GEMINI_BASE   = "https://generativelanguage.googleapis.com/v1beta/models/";
 // Fallback chain: try each model in order when previous is overloaded
 const GEMINI_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
+  "gemini-3.1-flash-lite",
 ];
 
 // ─── CORS headers (Supabase Edge Functions need these for browser calls) ───
@@ -25,6 +23,14 @@ const CORS = {
 // ─── main ──────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+
+  // Temporary: GET /ai-proxy lists available Gemini models
+  if (req.method === "GET") {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=" + GEMINI_KEY);
+    const d = await r.json();
+    const names = (d.models ?? []).map((m: {name:string}) => m.name);
+    return new Response(JSON.stringify(names, null, 2), { headers: { ...CORS, "Content-Type": "application/json" } });
+  }
 
   // Read body immediately — must happen before any other awaits
   const bodyText = await req.text();
