@@ -620,6 +620,7 @@ function showMainApp() {
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('main-app').style.display = 'block';
+  showTab('add'); // always land on Add word tab on login — prevents stale tab/UI from previous user
   document.getElementById('user-email').textContent = currentUser?.email ?? '';
   // init settings UI
   document.getElementById('ai-provider-select').value = AI_PROVIDER;
