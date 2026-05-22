@@ -303,10 +303,6 @@
       </div>
       <div class="bulk-status" id="synant-fill-status"></div>
     </div>
-    <div class="btn-row" style="margin-top:14px">
-      <button class="primary" onclick="saveSettings()">Save</button>
-      <button onclick="toggleSettings()">Close</button>
-    </div>
     <div id="settings-status"></div>
   </div>
 
@@ -595,11 +591,6 @@ function toggleSettings() {
 }
 
 
-function saveSettings() {
-  const el = document.getElementById('settings-status');
-  el.innerHTML = '<div class="status success">Saved!</div>';
-  setTimeout(() => el.innerHTML = '', 2000);
-}
 
 /* ═══════════════════════════════════════════════
    AUTH
