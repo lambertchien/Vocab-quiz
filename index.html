@@ -868,8 +868,10 @@ async function syncWithSupabase() {
     // remote is now authoritative — clear unsubscribe tombstones
     deletedSubs = [];
 
-    // re-register all lessons so lessons table has correct user_id and current email
+    // rebuild lessons table: delete all user's rows then re-register current ones
+    // this cleans up any stale rows left by past renames or deletes
     const syncedLessonNames = [...new Set(vocab.map(v => v.lesson).filter(Boolean))];
+    await sbFetch('/lessons?user_id=eq.' + encodeURIComponent(currentUser.id), { method: 'DELETE', prefer: 'return=minimal' }).catch(() => {});
     for (const name of syncedLessonNames) { await registerLesson(name); }
 
     persist();
@@ -1433,6 +1435,10 @@ async function confirmRenameLesson(gi, oldName) {
     const old = lessonsCache.find(l => l.name === oldName && l.user_id === currentUser.id);
     sbFetch('/lessons?name=eq.' + encodeURIComponent(oldName) + '&user_id=eq.' + currentUser.id, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => {});
     registerLesson(newName, old?.source_user_email || null, old?.original_user_email || null);
+    // update vocabs table so Browse All Lessons word counts are correct immediately
+    sbFetch('/vocabs?user_id=eq.' + currentUser.id + '&lesson=eq.' + encodeURIComponent(oldName), {
+      method: 'PATCH', body: JSON.stringify({ lesson: newName }), prefer: 'return=minimal'
+    }).catch(() => {});
     // update local cache so Browse All Lessons reflects the rename immediately
     const cached = lessonsCache.find(l => l.name === oldName && l.user_id === currentUser.id);
     if (cached) cached.name = newName;
