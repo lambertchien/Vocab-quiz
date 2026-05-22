@@ -1228,6 +1228,7 @@ CRITICAL: Never use the word "${v.word}" anywhere in either explanation. Reply O
 
 /* ── Fill synonyms & antonyms ── */
 let synAntFillSelected = new Set();
+let synAntFillLessons = [];
 let synAntFillRunning = false;
 let synAntFillStop = false;
 
@@ -1254,19 +1255,19 @@ function renderSynAntFillLessonList() {
     el.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:6px 0">All words already have synonyms &amp; antonyms.</div>';
     return;
   }
-  const lessons = [...needsMap.keys()].sort();
-  el.innerHTML = lessons.map((l, li) => {
+  synAntFillLessons = [...needsMap.keys()].sort();
+  el.innerHTML = synAntFillLessons.map((l, li) => {
     const label = l || 'No lesson';
     const count = needsMap.get(l);
     return `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
-      <input type="checkbox" data-synant-lesson="${li}" ${synAntFillSelected.has(l) ? 'checked' : ''} onchange="toggleSynAntFillLesson(${li},this.checked,${JSON.stringify(lessons)})" style="width:14px;height:14px;accent-color:var(--text)" />
+      <input type="checkbox" data-synant-lesson="${li}" ${synAntFillSelected.has(l) ? 'checked' : ''} onchange="toggleSynAntFillLesson(${li},this.checked)" style="width:14px;height:14px;accent-color:var(--text)" />
       <span>${escHtml(label)}</span><span style="font-size:11px;color:var(--text3);margin-left:4px">${count} word${count !== 1 ? 's' : ''} need filling</span>
     </label>`;
   }).join('');
 }
 
-function toggleSynAntFillLesson(idx, checked, lessons) {
-  const l = lessons[idx];
+function toggleSynAntFillLesson(idx, checked) {
+  const l = synAntFillLessons[idx];
   if (checked) synAntFillSelected.add(l); else synAntFillSelected.delete(l);
 }
 
@@ -1347,6 +1348,7 @@ async function startBulkFillSynAnt() {
 
   persist();
   renderList();
+  renderSynAntFillLessonList(); // refresh panel — completed lessons drop off the list
   document.getElementById('synant-fill-progress-bar').style.width = '100%';
   document.getElementById('synant-fill-status').textContent =
     `Done! ${done} filled${failed ? ', ' + failed + ' failed' : ''}. Sync to push changes to other devices.`;
