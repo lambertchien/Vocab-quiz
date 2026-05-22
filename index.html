@@ -267,10 +267,7 @@
     <h3>Settings</h3>
     <div class="settings-row">
       <div class="field-label">AI Provider</div>
-      <select id="ai-provider-select" onchange="toggleProviderFields()">
-        <option value="gemini">Google Gemini (gemini-2.5-flash)</option>
-        <option value="anthropic">Anthropic Claude (claude-sonnet-4)</option>
-      </select>
+      <span style="font-size:13px;color:var(--text2)">Gemini 3.1 Flash Lite (free)</span>
     </div>
     <div class="settings-row" style="margin-top:14px">
       <button onclick="toggleBulkPanel()" style="width:100%;font-size:13px;padding:9px">✨ AI re-explain words</button>
@@ -288,6 +285,23 @@
         <div class="bulk-progress-bar" id="bulk-progress-bar" style="width:0%"></div>
       </div>
       <div class="bulk-status" id="bulk-status"></div>
+    </div>
+    <div class="settings-row" style="margin-top:10px">
+      <button onclick="toggleSynAntFillPanel()" style="width:100%;font-size:13px;padding:9px">✨ Fill synonyms &amp; antonyms</button>
+    </div>
+    <div id="synant-fill-panel" style="display:none;margin-top:10px;padding:14px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg2)">
+      <div id="synant-fill-lesson-list" style="margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button onclick="synAntFillSelectAll()" style="font-size:12px;padding:4px 10px">All</button>
+        <button onclick="synAntFillSelectNone()" style="font-size:12px;padding:4px 10px">None</button>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Adds missing synonyms/antonyms only. Definition &amp; Chinese are never changed. Only shows lessons with words that need filling.</p>
+      <button id="synant-fill-start-btn" class="primary" onclick="startBulkFillSynAnt()" style="width:100%;margin-bottom:8px">Start</button>
+      <button id="synant-fill-stop-btn" onclick="stopBulkFillSynAnt()" style="width:100%;display:none">Stop</button>
+      <div class="bulk-progress-bar-wrap" id="synant-fill-progress-wrap" style="display:none">
+        <div class="bulk-progress-bar" id="synant-fill-progress-bar" style="width:0%"></div>
+      </div>
+      <div class="bulk-status" id="synant-fill-status"></div>
     </div>
     <div class="btn-row" style="margin-top:14px">
       <button class="primary" onclick="saveSettings()">Save</button>
@@ -581,13 +595,7 @@ function toggleSettings() {
 }
 
 
-function toggleProviderFields() {
-  // provider selector is still shown in settings — no per-field toggles needed
-}
-
 function saveSettings() {
-  AI_PROVIDER = document.getElementById('ai-provider-select').value;
-  localStorage.setItem('vq_ai_provider', AI_PROVIDER);
   const el = document.getElementById('settings-status');
   el.innerHTML = '<div class="status success">Saved!</div>';
   setTimeout(() => el.innerHTML = '', 2000);
@@ -623,7 +631,6 @@ function showMainApp() {
   showTab('add'); // always land on Add word tab on login — prevents stale tab/UI from previous user
   document.getElementById('user-email').textContent = currentUser?.email ?? '';
   // init settings UI
-  document.getElementById('ai-provider-select').value = AI_PROVIDER;
   // init word list UI
   try { renderList(); populateLessonSelect(); } catch(e) { console.warn('showMainApp render:', e); }
   renderSubscribedLessons();
@@ -1224,6 +1231,135 @@ CRITICAL: Never use the word "${v.word}" anywhere in either explanation. Reply O
   document.getElementById('bulk-start-btn').style.display = 'block';
   document.getElementById('bulk-stop-btn').style.display = 'none';
   bulkRunning = false;
+}
+
+/* ── Fill synonyms & antonyms ── */
+let synAntFillSelected = new Set();
+let synAntFillRunning = false;
+let synAntFillStop = false;
+
+function toggleSynAntFillPanel() {
+  const panel = document.getElementById('synant-fill-panel');
+  const visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : 'block';
+  if (!visible) { synAntFillSelected.clear(); renderSynAntFillLessonList(); }
+}
+
+function renderSynAntFillLessonList() {
+  const el = document.getElementById('synant-fill-lesson-list');
+  const myWords = vocab.filter(v => !v.lesson || true); // all own words
+  const needsMap = new Map(); // lesson -> count needing fill
+  for (const v of myWords) {
+    const needsSyn = !v.synonyms || v.synonyms.length === 0;
+    const needsAnt = !v.antonyms || v.antonyms.length === 0;
+    if (needsSyn || needsAnt) {
+      const l = v.lesson || '';
+      needsMap.set(l, (needsMap.get(l) || 0) + 1);
+    }
+  }
+  if (!needsMap.size) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:6px 0">All words already have synonyms &amp; antonyms.</div>';
+    return;
+  }
+  const lessons = [...needsMap.keys()].sort();
+  el.innerHTML = lessons.map((l, li) => {
+    const label = l || 'No lesson';
+    const count = needsMap.get(l);
+    return `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+      <input type="checkbox" data-synant-lesson="${li}" ${synAntFillSelected.has(l) ? 'checked' : ''} onchange="toggleSynAntFillLesson(${li},this.checked,${JSON.stringify(lessons)})" style="width:14px;height:14px;accent-color:var(--text)" />
+      <span>${escHtml(label)}</span><span style="font-size:11px;color:var(--text3);margin-left:4px">${count} word${count !== 1 ? 's' : ''} need filling</span>
+    </label>`;
+  }).join('');
+}
+
+function toggleSynAntFillLesson(idx, checked, lessons) {
+  const l = lessons[idx];
+  if (checked) synAntFillSelected.add(l); else synAntFillSelected.delete(l);
+}
+
+function synAntFillSelectAll() {
+  const myWords = vocab;
+  for (const v of myWords) {
+    if ((!v.synonyms || v.synonyms.length === 0) || (!v.antonyms || v.antonyms.length === 0))
+      synAntFillSelected.add(v.lesson || '');
+  }
+  renderSynAntFillLessonList();
+}
+
+function synAntFillSelectNone() { synAntFillSelected.clear(); renderSynAntFillLessonList(); }
+
+function stopBulkFillSynAnt() {
+  synAntFillStop = true;
+  document.getElementById('synant-fill-status').textContent = 'Stopping after current word…';
+}
+
+async function startBulkFillSynAnt() {
+  if (!currentUser) { document.getElementById('synant-fill-status').textContent = 'Please sign in first.'; return; }
+  const words = vocab.filter(v => {
+    if (!synAntFillSelected.has(v.lesson || '')) return false;
+    const needsSyn = !v.synonyms || v.synonyms.length === 0;
+    const needsAnt = !v.antonyms || v.antonyms.length === 0;
+    return needsSyn || needsAnt;
+  });
+  if (!words.length) { document.getElementById('synant-fill-status').textContent = 'No words need filling in selected lessons.'; return; }
+  const confirmed = confirm(`This will fill synonyms/antonyms for ${words.length} word${words.length !== 1 ? 's' : ''} using ${words.length} API requests. Continue?`);
+  if (!confirmed) return;
+
+  synAntFillRunning = true; synAntFillStop = false;
+  document.getElementById('synant-fill-start-btn').style.display = 'none';
+  document.getElementById('synant-fill-stop-btn').style.display = 'block';
+  document.getElementById('synant-fill-progress-wrap').style.display = 'block';
+
+  const total = words.length;
+  let done = 0, failed = 0;
+
+  for (const v of words) {
+    if (synAntFillStop) break;
+    document.getElementById('synant-fill-status').textContent = `Processing ${done + 1}/${total}: ${v.word}…`;
+    document.getElementById('synant-fill-progress-bar').style.width = (done / total * 100) + '%';
+
+    const needsSyn = !v.synonyms || v.synonyms.length === 0;
+    const needsAnt = !v.antonyms || v.antonyms.length === 0;
+    const prompt = `Word: "${v.word}". JSON only: {"synonyms":["4-6 simple synonyms"],"antonyms":["4-6 simple antonyms"]}`;
+
+    let attempts = 0, wordDone = false;
+    while (attempts < 3 && !wordDone) {
+      try {
+        const rawText = await callAI(prompt);
+        const parsed = safeParseAI(rawText);
+        if (needsSyn && parsed.synonyms && parsed.synonyms.length) v.synonyms = parsed.synonyms;
+        if (needsAnt && parsed.antonyms && parsed.antonyms.length) v.antonyms = parsed.antonyms;
+        touch(v);
+        done++;
+        wordDone = true;
+      } catch(e) {
+        const msg = e.message || '';
+        if ((msg.includes('quota') || msg.includes('rate') || msg.includes('429')) && attempts < 2) {
+          for (let s = 60; s > 0; s--) {
+            if (synAntFillStop) break;
+            document.getElementById('synant-fill-status').textContent = `Rate limit hit — waiting ${s}s… (${done}/${total} done)`;
+            await new Promise(r => setTimeout(r, 1000));
+          }
+          attempts++;
+        } else {
+          failed++;
+          done++;
+          wordDone = true;
+        }
+      }
+    }
+    if (!wordDone) { failed++; done++; }
+    if (!synAntFillStop) await new Promise(r => setTimeout(r, 200));
+  }
+
+  persist();
+  renderList();
+  document.getElementById('synant-fill-progress-bar').style.width = '100%';
+  document.getElementById('synant-fill-status').textContent =
+    `Done! ${done} filled${failed ? ', ' + failed + ' failed' : ''}. Sync to push changes to other devices.`;
+  document.getElementById('synant-fill-start-btn').style.display = 'block';
+  document.getElementById('synant-fill-stop-btn').style.display = 'none';
+  synAntFillRunning = false;
 }
 
 function renderFlashSetup() {
