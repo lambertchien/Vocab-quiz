@@ -580,8 +580,11 @@ function touch(v) {
 window.addEventListener('DOMContentLoaded', () => {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  supabaseClient.auth.onAuthStateChange((_event, session) => {
+  supabaseClient.auth.onAuthStateChange((event, session) => {
     currentUser = session?.user ?? null;
+    // TOKEN_REFRESHED fires mid-session and must not reload vocab — it would
+    // replace the vocab array and orphan any in-progress bulk operation's object references
+    if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') return;
     if (currentUser) showMainApp();
     else showLoginScreen();
   });
@@ -1294,7 +1297,7 @@ function synAntFillSelectNone() { synAntFillSelected.clear(); renderSynAntFillLe
 
 function stopBulkFillSynAnt() {
   synAntFillStop = true;
-  document.getElementById('synant-fill-status').textContent = 'Stopping after current word…';
+  document.getElementById('synant-fill-status').textContent = 'Stopping after current batch…';
 }
 
 async function startBulkFillSynAnt() {
@@ -1306,7 +1309,13 @@ async function startBulkFillSynAnt() {
     return needsSyn || needsAnt;
   });
   if (!words.length) { document.getElementById('synant-fill-status').textContent = 'No words need filling in selected lessons.'; return; }
-  const confirmed = confirm(`This will fill synonyms/antonyms for ${words.length} word${words.length !== 1 ? 's' : ''} using ${words.length} API requests. Continue?`);
+
+  const BATCH = 10;
+  const batches = [];
+  for (let i = 0; i < words.length; i += BATCH) batches.push(words.slice(i, i + BATCH));
+  const totalBatches = batches.length;
+
+  const confirmed = confirm(`Fill synonyms/antonyms for ${words.length} word${words.length !== 1 ? 's' : ''} in ${totalBatches} request${totalBatches !== 1 ? 's' : ''} (batches of ${BATCH}). Continue?`);
   if (!confirmed) return;
 
   synAntFillRunning = true; synAntFillStop = false;
@@ -1315,27 +1324,38 @@ async function startBulkFillSynAnt() {
   document.getElementById('synant-fill-progress-wrap').style.display = 'block';
 
   const total = words.length;
-  let done = 0, failed = 0;
+  let done = 0, filled = 0, failed = 0;
 
-  for (const v of words) {
+  for (let bi = 0; bi < batches.length; bi++) {
     if (synAntFillStop) break;
-    document.getElementById('synant-fill-status').textContent = `Processing ${done + 1}/${total}: ${v.word}…`;
+    const batch = batches[bi];
+    document.getElementById('synant-fill-status').textContent =
+      `Batch ${bi + 1}/${totalBatches} — words ${done + 1}–${Math.min(done + batch.length, total)} of ${total}…`;
     document.getElementById('synant-fill-progress-bar').style.width = (done / total * 100) + '%';
 
-    const needsSyn = !v.synonyms || v.synonyms.length === 0;
-    const needsAnt = !v.antonyms || v.antonyms.length === 0;
-    const prompt = `Word: "${v.word}". JSON only: {"synonyms":["4-6 simple synonyms"],"antonyms":["4-6 simple antonyms"]}`;
+    const wordList = batch.map(v => `"${v.word}"`).join(', ');
+    const prompt = `For each word give 4-6 simple synonyms and 4-6 simple antonyms.
+Return a JSON array only — each element has the exact word, its synonyms, and antonyms:
+[{"word":"...","synonyms":["..."],"antonyms":["..."]},...]
+Words: ${wordList}`;
 
-    let attempts = 0, wordDone = false;
-    while (attempts < 3 && !wordDone) {
+    let attempts = 0, batchDone = false;
+    while (attempts < 3 && !batchDone) {
       try {
         const rawText = await callAI(prompt);
         const parsed = safeParseAI(rawText);
-        if (needsSyn && parsed.synonyms && parsed.synonyms.length) v.synonyms = parsed.synonyms;
-        if (needsAnt && parsed.antonyms && parsed.antonyms.length) v.antonyms = parsed.antonyms;
-        touch(v);
-        done++;
-        wordDone = true;
+        const entries = Array.isArray(parsed) ? parsed : Object.values(parsed);
+        for (const v of batch) {
+          const entry = entries.find(e => e.word && e.word.toLowerCase() === v.word.toLowerCase());
+          if (!entry) { failed++; done++; continue; }
+          const needsSyn = !v.synonyms || v.synonyms.length === 0;
+          const needsAnt = !v.antonyms || v.antonyms.length === 0;
+          if (needsSyn && Array.isArray(entry.synonyms) && entry.synonyms.length) v.synonyms = entry.synonyms;
+          if (needsAnt && Array.isArray(entry.antonyms) && entry.antonyms.length) v.antonyms = entry.antonyms;
+          touch(v);
+          filled++; done++;
+        }
+        batchDone = true;
       } catch(e) {
         const msg = e.message || '';
         if ((msg.includes('quota') || msg.includes('rate') || msg.includes('429')) && attempts < 2) {
@@ -1346,22 +1366,21 @@ async function startBulkFillSynAnt() {
           }
           attempts++;
         } else {
-          failed++;
-          done++;
-          wordDone = true;
+          failed += batch.length; done += batch.length;
+          batchDone = true;
         }
       }
     }
-    if (!wordDone) { failed++; done++; }
+    if (!batchDone) { failed += batch.length; done += batch.length; }
     if (!synAntFillStop) await new Promise(r => setTimeout(r, 200));
   }
 
   persist();
   renderList();
-  renderSynAntFillLessonList(); // refresh panel — completed lessons drop off the list
+  renderSynAntFillLessonList();
   document.getElementById('synant-fill-progress-bar').style.width = '100%';
   document.getElementById('synant-fill-status').textContent =
-    `Done! ${done} filled${failed ? ', ' + failed + ' failed' : ''}. Sync to push changes to other devices.`;
+    `Done! ${filled} filled${failed ? ', ' + failed + ' failed' : ''}. Sync to push changes to other devices.`;
   document.getElementById('synant-fill-start-btn').style.display = 'block';
   document.getElementById('synant-fill-stop-btn').style.display = 'none';
   synAntFillRunning = false;
@@ -2290,7 +2309,7 @@ function fixJsonControlChars(src) {
 
 function safeParseAI(rawText) {
   const text = rawText.replace(/```json\s*|\s*```/g, '').trim();
-  const match = text.match(/\{[\s\S]*\}/);
+  const match = text.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
   const src = match ? match[0] : text;
   // Try 1: direct parse
   try { return JSON.parse(src); } catch(_) {}
