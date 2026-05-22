@@ -494,6 +494,16 @@
       <div class="quiz-hint" id="quiz-hint"></div>
       <div id="type-area" style="display:none">
         <input type="text" class="quiz-ans" id="quiz-ans" placeholder="Your answer..." onkeydown="handleQuizEnter(event)" />
+        <div id="synant-ans-wrap" style="display:none">
+          <div id="syn-ans-row">
+            <div style="font-size:12px;color:var(--text3);margin-bottom:3px">Synonym</div>
+            <input type="text" class="quiz-ans" id="quiz-syn-ans" placeholder="Type a synonym..." onkeydown="handleSynAntEnter(event,'syn')" />
+          </div>
+          <div id="ant-ans-row">
+            <div style="font-size:12px;color:var(--text3);margin-bottom:3px">Antonym</div>
+            <input type="text" class="quiz-ans" id="quiz-ant-ans" placeholder="Type an antonym..." onkeydown="handleSynAntEnter(event,'ant')" />
+          </div>
+        </div>
         <div class="btn-row">
           <button class="primary" onclick="checkAnswer()" id="check-btn">Check</button>
           <button onclick="nextQuestion()" id="next-btn" style="display:none">Next →</button>
@@ -2160,14 +2170,20 @@ function showQuestion() {
     speakBtnSingle.onclick = () => speak(v.word);
     const hasSyn = (v.synonyms||[]).length > 0;
     const hasAnt = (v.antonyms||[]).length > 0;
-    let hint = 'Write ';
-    if (hasSyn && hasAnt) hint += 'a synonym AND an antonym';
-    else if (hasSyn) hint += 'a synonym';
-    else hint += 'an antonym';
-    document.getElementById('quiz-hint').textContent = hint;
-    ans.placeholder = hasSyn && hasAnt ? 'Synonym: ___, Antonym: ___' : 'Your answer...';
+    document.getElementById('quiz-hint').textContent = '';
+    ans.style.display = 'none';
+    document.getElementById('synant-ans-wrap').style.display = 'block';
+    document.getElementById('syn-ans-row').style.display = hasSyn ? 'block' : 'none';
+    document.getElementById('ant-ans-row').style.display = hasAnt ? 'block' : 'none';
+    document.getElementById('quiz-syn-ans').value = '';
+    document.getElementById('quiz-ant-ans').value = '';
+    if (hasSyn) document.getElementById('quiz-syn-ans').focus();
+    else document.getElementById('quiz-ant-ans').focus();
+    return;
   }
 
+  ans.style.display = 'block';
+  document.getElementById('synant-ans-wrap').style.display = 'none';
   ans.value = '';
   ans.focus();
 }
@@ -2183,9 +2199,33 @@ function handleQuizEnter(e) {
   }
 }
 
+function handleSynAntEnter(e, field) {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  const v = quizQueue[quizIdx];
+  const antRow = document.getElementById('ant-ans-row');
+  if (field === 'syn' && antRow.style.display !== 'none') {
+    document.getElementById('quiz-ant-ans').focus();
+  } else {
+    const nextBtn = document.getElementById('next-btn');
+    const checkBtn = document.getElementById('check-btn');
+    if (nextBtn && nextBtn.style.display !== 'none') nextQuestion();
+    else if (checkBtn && checkBtn.style.display !== 'none') checkAnswer();
+  }
+}
+
 async function checkAnswer() {
   const v = quizQueue[quizIdx];
-  const ans = document.getElementById('quiz-ans').value.trim();
+  let ans;
+  if (quizMode === 'synant') {
+    const synVal = document.getElementById('quiz-syn-ans').value.trim();
+    const antVal = document.getElementById('quiz-ant-ans').value.trim();
+    const parts = [];
+    if (synVal) parts.push('Synonym: ' + synVal);
+    if (antVal) parts.push('Antonym: ' + antVal);
+    ans = parts.join(', ');
+  } else {
+    ans = document.getElementById('quiz-ans').value.trim();
+  }
   if (!ans) return;
 
   if (quizMode === 'explain' || quizMode === 'synant') {
