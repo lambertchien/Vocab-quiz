@@ -1431,8 +1431,11 @@ async function confirmRenameLesson(gi, oldName) {
   populateLessonSelect();
   if (currentUser && oldName) {
     const old = lessonsCache.find(l => l.name === oldName && l.user_id === currentUser.id);
-    sbFetch('/lessons?name=eq.' + encodeURIComponent(oldName), { method: 'DELETE', prefer: 'return=minimal' }).catch(() => {});
+    sbFetch('/lessons?name=eq.' + encodeURIComponent(oldName) + '&user_id=eq.' + currentUser.id, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => {});
     registerLesson(newName, old?.source_user_email || null, old?.original_user_email || null);
+    // update local cache so Browse All Lessons reflects the rename immediately
+    const cached = lessonsCache.find(l => l.name === oldName && l.user_id === currentUser.id);
+    if (cached) cached.name = newName;
   }
 }
 
