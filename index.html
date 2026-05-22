@@ -1325,6 +1325,9 @@ async function startBulkFillSynAnt() {
 
   const total = words.length;
   let done = 0, filled = 0, failed = 0;
+  // collect changes into a Map during async phase — applied atomically to vocab at the end
+  // so any vocab reassignment that happens mid-loop (e.g. token refresh side effects) cannot lose results
+  const updates = new Map(); // word.toLowerCase() -> { synonyms?, antonyms? }
 
   for (let bi = 0; bi < batches.length; bi++) {
     if (synAntFillStop) break;
@@ -1350,10 +1353,11 @@ Words: ${wordList}`;
           if (!entry) { failed++; done++; continue; }
           const needsSyn = !v.synonyms || v.synonyms.length === 0;
           const needsAnt = !v.antonyms || v.antonyms.length === 0;
-          if (needsSyn && Array.isArray(entry.synonyms) && entry.synonyms.length) v.synonyms = entry.synonyms;
-          if (needsAnt && Array.isArray(entry.antonyms) && entry.antonyms.length) v.antonyms = entry.antonyms;
-          touch(v);
-          filled++; done++;
+          const update = {};
+          if (needsSyn && Array.isArray(entry.synonyms) && entry.synonyms.length) update.synonyms = entry.synonyms;
+          if (needsAnt && Array.isArray(entry.antonyms) && entry.antonyms.length) update.antonyms = entry.antonyms;
+          if (Object.keys(update).length) { updates.set(v.word.toLowerCase(), update); filled++; }
+          done++;
         }
         batchDone = true;
       } catch(e) {
@@ -1373,6 +1377,15 @@ Words: ${wordList}`;
     }
     if (!batchDone) { failed += batch.length; done += batch.length; }
     if (!synAntFillStop) await new Promise(r => setTimeout(r, 200));
+  }
+
+  // apply all collected changes to current vocab in one synchronous step
+  for (const v of vocab) {
+    const u = updates.get(v.word.toLowerCase());
+    if (!u) continue;
+    if (u.synonyms) v.synonyms = u.synonyms;
+    if (u.antonyms) v.antonyms = u.antonyms;
+    touch(v);
   }
 
   persist();
