@@ -224,6 +224,11 @@
   .speed-btn { font-size: 12px; padding: 4px 12px; }
   .speed-btn.selected { background: var(--text); color: var(--bg); border-color: var(--text); }
 
+  /* word forms */
+  .word-forms-box { background: var(--bg3); border-radius: var(--radius); padding: 7px 12px; margin: 6px 0; font-size: 13px; color: var(--text2); display: flex; align-items: center; gap: 8px; }
+  .pos-badge { font-size: 11px; font-weight: 600; font-style: italic; color: var(--text); background: var(--bg); border: 0.5px solid var(--border2); border-radius: 5px; padding: 2px 7px; flex-shrink: 0; white-space: nowrap; }
+  .fc-pos-label { font-size: 20px; font-style: italic; color: var(--text2); margin-top: 6px; min-height: 28px; font-weight: 500; }
+
   /* login screen */
   .login-screen { width: 100%; max-width: 400px; background: var(--bg); border-radius: var(--radius-lg); border: 0.5px solid var(--border); padding: 2rem 1.5rem; }
   .login-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
@@ -303,6 +308,23 @@
       </div>
       <div class="bulk-status" id="synant-fill-status"></div>
     </div>
+    <div class="settings-row" style="margin-top:10px">
+      <button onclick="toggleWordFormsFillPanel()" style="width:100%;font-size:13px;padding:9px">✨ Fill word forms</button>
+    </div>
+    <div id="word-forms-fill-panel" style="display:none;margin-top:10px;padding:14px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg2)">
+      <div id="word-forms-fill-lesson-list" style="margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button onclick="wordFormsFillSelectAll()" style="font-size:12px;padding:4px 10px">All</button>
+        <button onclick="wordFormsFillSelectNone()" style="font-size:12px;padding:4px 10px">None</button>
+      </div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:10px">Adds part of speech and word forms (e.g. cat/cats, run/ran/run) to words that are missing them. Batched 10 words per request.</p>
+      <button id="word-forms-fill-start-btn" class="primary" onclick="startBulkFillWordForms()" style="width:100%;margin-bottom:8px">Start</button>
+      <button id="word-forms-fill-stop-btn" onclick="stopBulkFillWordForms()" style="width:100%;display:none">Stop</button>
+      <div class="bulk-progress-bar-wrap" id="word-forms-fill-progress-wrap" style="display:none">
+        <div class="bulk-progress-bar" id="word-forms-fill-progress-bar" style="width:0%"></div>
+      </div>
+      <div class="bulk-status" id="word-forms-fill-status"></div>
+    </div>
     <div id="settings-status"></div>
   </div>
 
@@ -331,6 +353,7 @@
         <div class="vocab-word" id="preview-word"></div>
         <button class="speak-btn" id="preview-speak-btn" onclick="" title="Pronounce">🔊</button>
       </div>
+      <div id="preview-word-forms"></div>
       <div class="field-label" style="margin-top:8px">English explanation</div>
       <textarea id="preview-def" rows="3" placeholder="Auto-filled — edit if needed"></textarea>
       <div class="field-label">Chinese explanation</div>
@@ -412,12 +435,13 @@
           <div class="fc-face fc-face-front">
             <div class="fc-phase-label">Word</div>
             <div class="flashcard-word" id="fc-word"></div>
+            <div class="fc-pos-label" id="fc-pos-label"></div>
             <button class="fc-speak-btn" onclick="speak(document.getElementById('fc-word').textContent)" title="Pronounce">🔊</button>
             <button onclick="flipToMeaning()" style="margin-top:14px;font-size:13px;padding:6px 18px">Flip ↩</button>
           </div>
           <!-- BACK: meanings -->
           <div class="fc-face fc-face-back">
-            <div class="fc-phase-label">Meaning</div>
+            <div id="fc-forms-line"></div>
             <div class="flashcard-meanings" id="fc-meanings"></div>
             <button class="fc-detail-btn" id="fc-detail-btn" onclick="toggleFcDetail()" style="font-size:11px">▼ Detail</button>
             <div class="flashcard-detail" id="fc-detail" style="display:none;text-align:left;width:100%">
@@ -540,7 +564,8 @@ function normalizeVocab(arr) {
   return arr.map(v => ({
     ...v,
     definition: typeof v.definition === 'string' ? v.definition : (Array.isArray(v.definition) ? v.definition.join('\n') : String(v.definition || '')),
-    translation: typeof v.translation === 'string' ? v.translation : String(v.translation || '')
+    translation: typeof v.translation === 'string' ? v.translation : String(v.translation || ''),
+    wordForms: v.wordForms || null
   }));
 }
 let vocab = [];
@@ -715,6 +740,7 @@ function vocabToRow(v, deleted=false) {
     translation: v.translation || '',
     synonyms: JSON.stringify(v.synonyms || []),
     antonyms: JSON.stringify(v.antonyms || []),
+    word_forms: v.wordForms ? JSON.stringify(v.wordForms) : '',
     lesson: v.lesson || '',
     correct: v.correct || 0, wrong: v.wrong || 0,
     last_modified: v.lastModified || Date.now(),
@@ -728,6 +754,7 @@ function rowToVocabWithTs(r) {
     translation: r.translation || '',
     synonyms: JSON.parse(r.synonyms || '[]'),
     antonyms: JSON.parse(r.antonyms || '[]'),
+    wordForms: r.word_forms ? JSON.parse(r.word_forms) : null,
     lesson: r.lesson || '',
     correct: r.correct || 0, wrong: r.wrong || 0,
     lastModified: r.last_modified || 0
@@ -741,6 +768,7 @@ function rowToVocab(r) {
     translation: r.translation || '',
     synonyms: JSON.parse(r.synonyms || '[]'),
     antonyms: JSON.parse(r.antonyms || '[]'),
+    wordForms: r.word_forms ? JSON.parse(r.word_forms) : null,
     lesson: r.lesson || '',
     correct: r.correct || 0, wrong: r.wrong || 0
   };
@@ -818,6 +846,7 @@ async function syncWithSupabase() {
           translation: local.translation || '',
           synonyms: JSON.stringify(local.synonyms || []),
           antonyms: JSON.stringify(local.antonyms || []),
+          word_forms: local.wordForms ? JSON.stringify(local.wordForms) : '',
           lesson: local.lesson || '',
           correct: newCorrect, wrong: newWrong,
           last_modified: localTs,
@@ -830,6 +859,7 @@ async function syncWithSupabase() {
         local.translation = r.translation || local.translation;
         local.synonyms = JSON.parse(r.synonyms || '[]');
         local.antonyms = JSON.parse(r.antonyms || '[]');
+        if (r.word_forms) local.wordForms = JSON.parse(r.word_forms);
         local.lesson = r.lesson || local.lesson;
         local.correct = Math.max(local.correct || 0, r.correct || 0);
         local.wrong = Math.max(local.wrong || 0, r.wrong || 0);
@@ -990,9 +1020,10 @@ async function lookupWord() {
 - "word": the correctly spelled base form of the word
 - "definition": English explanation. STRICT FORMAT: one meaning per line, lines separated by \\n (backslash-n, NOT a real newline). Each line: "Synonym1, Synonym2 (plain-English explanation for elementary students, always end with closing parenthesis)". Never use "${word}" or any inflection of it. Example for "watch": "Observe, View (to look carefully at something happening, like a movie or a game)\\nTimepiece (a small clock worn on the wrist to show the time)"
 - "translation": Traditional Chinese (繁體中文, Taiwan) explanation. STRICT FORMAT: same \\n-separated lines as definition. Each line: "中文詞1、中文詞2（用簡單中文解釋，結尾必須有右括號）". Never use the English word. Example for "watch": "觀看、注視（仔細地看某件事情，例如看電影或比賽）\\n手錶（戴在手腕上用來知道時間的小型計時器）"
+- "wordForms": object with "pos" (part of speech: "n.", "v.", "adj.", "adv.", "prep.", "conj.", "pron.", or "interj.") and "forms" array: noun→[singular,plural], verb→[base form,past simple,past participle], adjective→[base] or [base,comparative,superlative] if irregular, others→[base form only]
 
 CRITICAL RULES:
-1. Always include both "definition" AND "translation" fields.
+1. Always include "definition", "translation", AND "wordForms" fields.
 2. Every meaning line MUST end with a closing parenthesis ).
 3. Use the two-character sequence \\n to separate meanings — never a real line break inside the JSON string.
 4. Reply ONLY with the JSON object. No markdown, no extra text.
@@ -1034,6 +1065,9 @@ If the word does not exist in English, return {"error": "Word not found"}.`;
     renderPreviewTags('syn'); renderPreviewTags('ant');
     document.getElementById('preview-card')._word = parsed.word || word;
     document.getElementById('preview-card')._def = parsed.definition || '';
+    document.getElementById('preview-card')._wordForms = parsed.wordForms || null;
+    const wfEl = document.getElementById('preview-word-forms');
+    if (wfEl) wfEl.innerHTML = parsed.wordForms ? renderWordFormsBox({ wordForms: parsed.wordForms }) : '';
     // store ref so saveWord can read edited value from textarea
     const prevLesson = document.getElementById('lesson-select').value;
     populateLessonSelect();
@@ -1085,6 +1119,7 @@ async function saveWord() {
   const entry = {
     word: card._word, definition: def || card._def, translation: zh,
     synonyms: [...previewSyns], antonyms: [...previewAnts],
+    wordForms: card._wordForms || null,
     lesson: newLesson || selLesson || '', correct: 0, wrong: 0
   };
   touch(entry);
@@ -1399,6 +1434,137 @@ Words: ${wordList}`;
   synAntFillRunning = false;
 }
 
+/* ── Fill word forms ── */
+let wordFormsFillSelected = new Set();
+let wordFormsFillLessons = [];
+let wordFormsFillRunning = false;
+let wordFormsFillStop = false;
+
+function toggleWordFormsFillPanel() {
+  const panel = document.getElementById('word-forms-fill-panel');
+  const visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : 'block';
+  if (!visible) { wordFormsFillSelected.clear(); renderWordFormsFillLessonList(); }
+}
+
+function renderWordFormsFillLessonList() {
+  const el = document.getElementById('word-forms-fill-lesson-list');
+  const needsMap = new Map();
+  for (const v of vocab) {
+    if (!v.wordForms || !v.wordForms.pos) {
+      const l = v.lesson || '';
+      needsMap.set(l, (needsMap.get(l) || 0) + 1);
+    }
+  }
+  if (!needsMap.size) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--text2);padding:6px 0">All words already have word forms.</div>';
+    return;
+  }
+  wordFormsFillLessons = [...needsMap.keys()].sort();
+  el.innerHTML = wordFormsFillLessons.map((l, li) => {
+    const label = l || 'No lesson';
+    const count = needsMap.get(l);
+    return `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+      <input type="checkbox" ${wordFormsFillSelected.has(l) ? 'checked' : ''} onchange="toggleWordFormsFillLesson(${li},this.checked)" style="width:14px;height:14px;accent-color:var(--text)" />
+      <span>${escHtml(label)}</span><span style="font-size:11px;color:var(--text3);margin-left:4px">${count} word${count !== 1 ? 's' : ''} need filling</span>
+    </label>`;
+  }).join('');
+}
+
+function toggleWordFormsFillLesson(idx, checked) {
+  const l = wordFormsFillLessons[idx];
+  if (checked) wordFormsFillSelected.add(l); else wordFormsFillSelected.delete(l);
+}
+function wordFormsFillSelectAll() {
+  for (const v of vocab) { if (!v.wordForms || !v.wordForms.pos) wordFormsFillSelected.add(v.lesson || ''); }
+  renderWordFormsFillLessonList();
+}
+function wordFormsFillSelectNone() { wordFormsFillSelected.clear(); renderWordFormsFillLessonList(); }
+
+function stopBulkFillWordForms() {
+  wordFormsFillStop = true;
+  document.getElementById('word-forms-fill-status').textContent = 'Stopping after current batch…';
+}
+
+async function startBulkFillWordForms() {
+  if (!currentUser) { document.getElementById('word-forms-fill-status').textContent = 'Please sign in first.'; return; }
+  const words = vocab.filter(v => wordFormsFillSelected.has(v.lesson || '') && (!v.wordForms || !v.wordForms.pos));
+  if (!words.length) { document.getElementById('word-forms-fill-status').textContent = 'No words need filling in selected lessons.'; return; }
+
+  const BATCH = 10;
+  const batches = [];
+  for (let i = 0; i < words.length; i += BATCH) batches.push(words.slice(i, i + BATCH));
+  const totalBatches = batches.length;
+
+  const confirmed = confirm(`Fill word forms for ${words.length} word${words.length !== 1 ? 's' : ''} in ${totalBatches} request${totalBatches !== 1 ? 's' : ''} (batches of ${BATCH}). Continue?`);
+  if (!confirmed) return;
+
+  wordFormsFillRunning = true; wordFormsFillStop = false;
+  document.getElementById('word-forms-fill-start-btn').style.display = 'none';
+  document.getElementById('word-forms-fill-stop-btn').style.display = 'block';
+  document.getElementById('word-forms-fill-progress-wrap').style.display = 'block';
+
+  const total = words.length;
+  let done = 0, filled = 0, failed = 0;
+  const updates = new Map();
+
+  for (let bi = 0; bi < batches.length; bi++) {
+    if (wordFormsFillStop) break;
+    const batch = batches[bi];
+    document.getElementById('word-forms-fill-status').textContent =
+      `Batch ${bi + 1}/${totalBatches} — words ${done + 1}–${Math.min(done + batch.length, total)} of ${total}…`;
+    document.getElementById('word-forms-fill-progress-bar').style.width = (done / total * 100) + '%';
+
+    const wordList = batch.map(v => `"${v.word}"`).join(', ');
+    const prompt = `For each English word, provide its part of speech and word forms. Return a JSON array only, no other text:
+[{"word":"...","pos":"n.","forms":["singular","plural"]},...]
+pos: "n."=noun, "v."=verb, "adj."=adjective, "adv."=adverb, "prep."=preposition, "conj."=conjunction, "pron."=pronoun, "interj."=interjection
+forms: noun→[singular,plural], verb→[base form,past simple,past participle], adjective→[base] or [base,comparative,superlative] if they differ, other→[base form]
+Words: ${wordList}`;
+
+    let attempts = 0, batchDone = false;
+    while (attempts < 3 && !batchDone) {
+      try {
+        const rawText = await callAI(prompt);
+        const parsed = safeParseAI(rawText);
+        const arr = Array.isArray(parsed) ? parsed : [];
+        for (const item of arr) {
+          if (item.word && item.pos) updates.set(item.word.toLowerCase(), { pos: item.pos, forms: item.forms || [] });
+        }
+        done += batch.length;
+        filled += arr.filter(item => item.pos).length;
+        batchDone = true;
+      } catch(e) {
+        const msg = e.message || '';
+        if ((msg.includes('quota') || msg.includes('rate') || msg.includes('429')) && attempts < 2) {
+          for (let s = 60; s > 0; s--) {
+            if (wordFormsFillStop) break;
+            document.getElementById('word-forms-fill-status').textContent = `Rate limit — waiting ${s}s… (${done}/${total} done)`;
+            await new Promise(r => setTimeout(r, 1000));
+          }
+          attempts++;
+        } else { failed++; done += batch.length; batchDone = true; }
+      }
+    }
+    if (!batchDone) { failed++; done += batch.length; }
+    if (!wordFormsFillStop) await new Promise(r => setTimeout(r, 200));
+  }
+
+  for (const v of vocab) {
+    const upd = updates.get(v.word.toLowerCase());
+    if (upd) { v.wordForms = upd; touch(v); }
+  }
+
+  persist();
+  renderList();
+  document.getElementById('word-forms-fill-progress-bar').style.width = '100%';
+  document.getElementById('word-forms-fill-status').textContent =
+    `Done! ${filled} filled${failed ? ', ' + failed + ' failed' : ''}. Sync to push changes to other devices.`;
+  document.getElementById('word-forms-fill-start-btn').style.display = 'block';
+  document.getElementById('word-forms-fill-stop-btn').style.display = 'none';
+  wordFormsFillRunning = false;
+}
+
 function renderFlashSetup() {
   const lessons = allLessons();
   for (const s of flashSelectedSubsets) { if (!lessons.includes(s)) flashSelectedSubsets.delete(s); }
@@ -1540,6 +1706,7 @@ function renderList() {
                   <button class="del-btn" onclick="deleteWord(${i})">remove</button>
                 </div>
               </div>
+              ${renderWordFormsBox(v)}
               <div class="vocab-def" style="white-space:pre-line">${escHtml(v.definition)}</div>
               <div class="vocab-tags" style="margin-top:6px">
                 ${v.translation ? `<span class="tag zh" title="${escHtml(v.translation)}">ZH: ${escHtml(v.translation).length > 20 ? escHtml(v.translation).slice(0,20) + "…" : escHtml(v.translation)} </span>` : ''}
@@ -1558,6 +1725,11 @@ function renderList() {
               <textarea id="ep-def-${i}" rows="3" placeholder="Enter definition">${(String(v.definition||'')).replace(/</g,'&lt;')}</textarea>
               <div class="field-label">Chinese explanation</div>
               <textarea id="ep-zh-${i}" rows="3" placeholder="Enter Chinese explanation">${(String(v.translation||'')).replace(/</g,'&lt;')}</textarea>
+              <div class="field-label">Part of speech &amp; forms</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="text" id="ep-pos-${i}" placeholder="n. v. adj." value="${escHtml(v.wordForms?.pos||'')}" style="width:80px;flex:0 0 80px" />
+                <input type="text" id="ep-forms-${i}" placeholder="e.g. cat, cats" value="${escHtml((v.wordForms?.forms||[]).join(', '))}" style="flex:1" />
+              </div>
               <div class="field-label">Synonyms <span style="font-weight:400;color:var(--text3)">(click to remove)</span></div>
               <div class="vocab-tags" id="ep-syn-tags-${i}"></div>
               <div class="add-tag-row">
@@ -1616,6 +1788,7 @@ function renderList() {
                   <button class="speak-btn" onclick="speak('${v.word.replace(/'/g,"\\'")}');event.stopPropagation()" title="Pronounce">🔊</button>
                 </div>
               </div>
+              ${renderWordFormsBox(v)}
               <div class="vocab-def" style="white-space:pre-line">${escHtml(v.definition)}</div>
               <div class="vocab-tags" style="margin-top:6px">
                 ${v.translation ? `<span class="tag zh">ZH: ${escHtml(v.translation).length>20?escHtml(v.translation).slice(0,20)+'…':escHtml(v.translation)}</span>` : ''}
@@ -1721,6 +1894,24 @@ function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+function renderWordFormsBox(v) {
+  if (!v.wordForms || !v.wordForms.pos) return '';
+  const { pos, forms } = v.wordForms;
+  let formsText = '';
+  if (forms && forms.length) {
+    if (pos === 'n.' && forms.length >= 2) {
+      formsText = `${escHtml(forms[0])} (sing.) · ${escHtml(forms[1])} (pl.)`;
+    } else if (pos === 'v.' && forms.length >= 3) {
+      formsText = `${escHtml(forms[0])} · ${escHtml(forms[1])} · has ${escHtml(forms[2])}`;
+    } else if ((pos === 'adj.' || pos === 'adv.') && forms.length >= 3) {
+      formsText = `${escHtml(forms[0])} · ${escHtml(forms[1])} · ${escHtml(forms[2])}`;
+    } else {
+      formsText = forms.map(f => escHtml(f)).join(' · ');
+    }
+  }
+  return `<div class="word-forms-box"><span class="pos-badge">${escHtml(pos)}</span>${formsText ? `<span>${formsText}</span>` : ''}</div>`;
+}
+
 function shortEmail(email) {
   if (!email) return '';
   return email.length > 24 ? email.slice(0, 20) + '…' : email;
@@ -1803,6 +1994,7 @@ async function renderSubscribedLessons() {
         translation: r.translation || '',
         synonyms: JSON.parse(r.synonyms || '[]'),
         antonyms: JSON.parse(r.antonyms || '[]'),
+        wordForms: r.word_forms ? JSON.parse(r.word_forms) : null,
         lesson: r.lesson || sub.name,
         correct: 0, wrong: 0, readOnly: true,
         ownerUserId: sub.ownerUserId, ownerEmail: sub.ownerEmail
@@ -1867,6 +2059,11 @@ function saveEdit(i) {
   const newDef = document.getElementById('ep-def-' + i).value.trim();
   if (newDef) vocab[i].definition = newDef;
   vocab[i].translation = document.getElementById('ep-zh-' + i).value.trim();
+  const posVal = document.getElementById('ep-pos-' + i)?.value.trim();
+  const formsStr = document.getElementById('ep-forms-' + i)?.value.trim();
+  vocab[i].wordForms = posVal
+    ? { pos: posVal, forms: formsStr ? formsStr.split(',').map(s => s.trim()).filter(Boolean) : [] }
+    : null;
   touch(vocab[i]);
   const newL = document.getElementById('ep-lesson-new-' + i).value.trim();
   const selL = document.getElementById('ep-lesson-' + i).value;
@@ -2031,7 +2228,26 @@ function showFlashcard() {
   const minH = Math.max(240, 80 + lines * (fontSize * 2.2) + 100);
   const fcInner = document.getElementById('fc-card-inner');
   if (fcInner) fcInner.style.minHeight = minH + 'px';
-  document.getElementById('fc-def').textContent = String(v.definition || '');
+  const fcDefEl = document.getElementById('fc-def');
+  const wfBox = (v.wordForms && v.wordForms.forms && v.wordForms.forms.length) ? renderWordFormsBox(v) : '';
+  fcDefEl.innerHTML = wfBox + `<span style="white-space:pre-line">${escHtml(String(v.definition || ''))}</span>`;
+  const fcPosEl = document.getElementById('fc-pos-label');
+  if (fcPosEl) fcPosEl.textContent = v.wordForms?.pos || '';
+  const fcFormsLine = document.getElementById('fc-forms-line');
+  if (fcFormsLine) {
+    if (v.wordForms && v.wordForms.pos) {
+      const { pos, forms } = v.wordForms;
+      let ft = '';
+      if (forms && forms.length) {
+        if (pos === 'n.' && forms.length >= 2) ft = `${escHtml(forms[0])} · ${escHtml(forms[1])}`;
+        else if (pos === 'v.' && forms.length >= 3) ft = `${escHtml(forms[0])} · ${escHtml(forms[1])} · has ${escHtml(forms[2])}`;
+        else ft = forms.map(f => escHtml(f)).join(' · ');
+      }
+      fcFormsLine.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px"><span class="pos-badge">${escHtml(pos)}</span>${ft ? `<span style="font-size:14px;color:var(--text2)">${ft}</span>` : ''}</div>`;
+    } else {
+      fcFormsLine.innerHTML = '<div class="fc-phase-label">Meaning</div>';
+    }
+  }
   document.getElementById('fc-detail').style.display = 'none';
   document.getElementById('fc-detail-btn').textContent = '▼ Detail explanation';
   // always start on front (word side)
