@@ -1020,7 +1020,7 @@ async function lookupWord() {
 - "word": the correctly spelled base form of the word
 - "definition": English explanation. STRICT FORMAT: one meaning per line, lines separated by \\n (backslash-n, NOT a real newline). Each line: "Synonym1, Synonym2 (plain-English explanation for elementary students, always end with closing parenthesis)". Never use "${word}" or any inflection of it. Example for "watch": "Observe, View (to look carefully at something happening, like a movie or a game)\\nTimepiece (a small clock worn on the wrist to show the time)"
 - "translation": Traditional Chinese (繁體中文, Taiwan) explanation. STRICT FORMAT: same \\n-separated lines as definition. Each line: "中文詞1、中文詞2（用簡單中文解釋，結尾必須有右括號）". Never use the English word. Example for "watch": "觀看、注視（仔細地看某件事情，例如看電影或比賽）\\n手錶（戴在手腕上用來知道時間的小型計時器）"
-- "wordForms": object with "pos" (part of speech: "n.", "v.", "adj.", "adv.", "prep.", "conj.", "pron.", or "interj.") and "forms" array: noun→[singular,plural], verb→[base form,past simple,past participle], adjective→[base] or [base,comparative,superlative] if irregular, others→[base form only]
+- "wordForms": array of objects, one per part of speech the word can serve as. Each: {"pos":"n.","forms":[...]}. pos values: "n.", "v.", "adj.", "adv.", "prep.", "conj.", "pron.", "interj.". forms: noun→[singular,plural], verb→[base,past simple,past participle], adj→[base] or [base,comparative,superlative] if irregular, others→[base form]. Include ALL applicable parts of speech. Example for "water": [{"pos":"n.","forms":["water","waters"]},{"pos":"v.","forms":["water","watered","watered"]}]
 
 CRITICAL RULES:
 1. Always include "definition", "translation", AND "wordForms" fields.
@@ -1451,7 +1451,7 @@ function renderWordFormsFillLessonList() {
   const el = document.getElementById('word-forms-fill-lesson-list');
   const needsMap = new Map();
   for (const v of vocab) {
-    if (!v.wordForms || !v.wordForms.pos) {
+    if (!normalizeWordForms(v.wordForms).length) {
       const l = v.lesson || '';
       needsMap.set(l, (needsMap.get(l) || 0) + 1);
     }
@@ -1476,7 +1476,7 @@ function toggleWordFormsFillLesson(idx, checked) {
   if (checked) wordFormsFillSelected.add(l); else wordFormsFillSelected.delete(l);
 }
 function wordFormsFillSelectAll() {
-  for (const v of vocab) { if (!v.wordForms || !v.wordForms.pos) wordFormsFillSelected.add(v.lesson || ''); }
+  for (const v of vocab) { if (!normalizeWordForms(v.wordForms).length) wordFormsFillSelected.add(v.lesson || ''); }
   renderWordFormsFillLessonList();
 }
 function wordFormsFillSelectNone() { wordFormsFillSelected.clear(); renderWordFormsFillLessonList(); }
@@ -1488,7 +1488,7 @@ function stopBulkFillWordForms() {
 
 async function startBulkFillWordForms() {
   if (!currentUser) { document.getElementById('word-forms-fill-status').textContent = 'Please sign in first.'; return; }
-  const words = vocab.filter(v => wordFormsFillSelected.has(v.lesson || '') && (!v.wordForms || !v.wordForms.pos));
+  const words = vocab.filter(v => wordFormsFillSelected.has(v.lesson || '') && (!normalizeWordForms(v.wordForms).length));
   if (!words.length) { document.getElementById('word-forms-fill-status').textContent = 'No words need filling in selected lessons.'; return; }
 
   const BATCH = 10;
@@ -1516,10 +1516,11 @@ async function startBulkFillWordForms() {
     document.getElementById('word-forms-fill-progress-bar').style.width = (done / total * 100) + '%';
 
     const wordList = batch.map(v => `"${v.word}"`).join(', ');
-    const prompt = `For each English word, provide its part of speech and word forms. Return a JSON array only, no other text:
-[{"word":"...","pos":"n.","forms":["singular","plural"]},...]
+    const prompt = `For each English word, provide ALL its parts of speech and word forms. Return a JSON array only, no other text:
+[{"word":"...","wordForms":[{"pos":"n.","forms":["singular","plural"]},{"pos":"v.","forms":["base","past","pastParticiple"]}]},...]
+Include every part of speech the word can serve as (e.g. "water" is both n. and v.).
 pos: "n."=noun, "v."=verb, "adj."=adjective, "adv."=adverb, "prep."=preposition, "conj."=conjunction, "pron."=pronoun, "interj."=interjection
-forms: noun→[singular,plural], verb→[base form,past simple,past participle], adjective→[base] or [base,comparative,superlative] if they differ, other→[base form]
+forms: noun→[singular,plural], verb→[base,past simple,past participle], adj→[base] or [base,comparative,superlative] if they differ, other→[base form]
 Words: ${wordList}`;
 
     let attempts = 0, batchDone = false;
@@ -1529,10 +1530,13 @@ Words: ${wordList}`;
         const parsed = safeParseAI(rawText);
         const arr = Array.isArray(parsed) ? parsed : [];
         for (const item of arr) {
-          if (item.word && item.pos) updates.set(item.word.toLowerCase(), { pos: item.pos, forms: item.forms || [] });
+          if (!item.word) continue;
+          // support both new {wordForms:[...]} and legacy {pos,forms} shapes
+          const wf = item.wordForms || (item.pos ? [{ pos: item.pos, forms: item.forms || [] }] : null);
+          if (wf) updates.set(item.word.toLowerCase(), wf);
         }
         done += batch.length;
-        filled += arr.filter(item => item.pos).length;
+        filled += arr.filter(item => item.wordForms || item.pos).length;
         batchDone = true;
       } catch(e) {
         const msg = e.message || '';
@@ -1552,7 +1556,7 @@ Words: ${wordList}`;
 
   for (const v of vocab) {
     const upd = updates.get(v.word.toLowerCase());
-    if (upd) { v.wordForms = upd; touch(v); }
+    if (upd) { v.wordForms = Array.isArray(upd) ? upd : [upd]; touch(v); }
   }
 
   persist();
@@ -1725,11 +1729,8 @@ function renderList() {
               <textarea id="ep-def-${i}" rows="3" placeholder="Enter definition">${(String(v.definition||'')).replace(/</g,'&lt;')}</textarea>
               <div class="field-label">Chinese explanation</div>
               <textarea id="ep-zh-${i}" rows="3" placeholder="Enter Chinese explanation">${(String(v.translation||'')).replace(/</g,'&lt;')}</textarea>
-              <div class="field-label">Part of speech &amp; forms</div>
-              <div style="display:flex;gap:8px;align-items:center">
-                <input type="text" id="ep-pos-${i}" placeholder="n. v. adj." value="${escHtml(v.wordForms?.pos||'')}" style="width:80px;flex:0 0 80px" />
-                <input type="text" id="ep-forms-${i}" placeholder="e.g. cat, cats" value="${escHtml((v.wordForms?.forms||[]).join(', '))}" style="flex:1" />
-              </div>
+              <div class="field-label">Part of speech &amp; forms <span style="font-weight:400;color:var(--text3)">(one per line: "n. word, words")</span></div>
+              <textarea id="ep-wordforms-${i}" rows="2" placeholder="n. water, waters&#10;v. water, watered, watered">${escHtml(wordFormsToText(v.wordForms))}</textarea>
               <div class="field-label">Synonyms <span style="font-weight:400;color:var(--text3)">(click to remove)</span></div>
               <div class="vocab-tags" id="ep-syn-tags-${i}"></div>
               <div class="add-tag-row">
@@ -1894,22 +1895,43 @@ function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+function normalizeWordForms(wf) {
+  if (!wf) return [];
+  if (Array.isArray(wf)) return wf.filter(e => e && e.pos);
+  if (wf.pos) return [wf]; // legacy single-object format
+  return [];
+}
+
+function formsLineText(pos, forms) {
+  if (!forms || !forms.length) return '';
+  if (pos === 'n.' && forms.length >= 2) return `${escHtml(forms[0])} (sing.) · ${escHtml(forms[1])} (pl.)`;
+  if (pos === 'v.' && forms.length >= 3) return `${escHtml(forms[0])} · ${escHtml(forms[1])} · has ${escHtml(forms[2])}`;
+  if ((pos === 'adj.' || pos === 'adv.') && forms.length >= 3) return `${escHtml(forms[0])} · ${escHtml(forms[1])} · ${escHtml(forms[2])}`;
+  return forms.map(f => escHtml(f)).join(' · ');
+}
+
 function renderWordFormsBox(v) {
-  if (!v.wordForms || !v.wordForms.pos) return '';
-  const { pos, forms } = v.wordForms;
-  let formsText = '';
-  if (forms && forms.length) {
-    if (pos === 'n.' && forms.length >= 2) {
-      formsText = `${escHtml(forms[0])} (sing.) · ${escHtml(forms[1])} (pl.)`;
-    } else if (pos === 'v.' && forms.length >= 3) {
-      formsText = `${escHtml(forms[0])} · ${escHtml(forms[1])} · has ${escHtml(forms[2])}`;
-    } else if ((pos === 'adj.' || pos === 'adv.') && forms.length >= 3) {
-      formsText = `${escHtml(forms[0])} · ${escHtml(forms[1])} · ${escHtml(forms[2])}`;
-    } else {
-      formsText = forms.map(f => escHtml(f)).join(' · ');
-    }
-  }
-  return `<div class="word-forms-box"><span class="pos-badge">${escHtml(pos)}</span>${formsText ? `<span>${formsText}</span>` : ''}</div>`;
+  const entries = normalizeWordForms(v.wordForms);
+  if (!entries.length) return '';
+  return entries.map(({ pos, forms }) => {
+    const ft = formsLineText(pos, forms);
+    return `<div class="word-forms-box"><span class="pos-badge">${escHtml(pos)}</span>${ft ? `<span>${ft}</span>` : ''}</div>`;
+  }).join('');
+}
+
+function wordFormsToText(wf) {
+  return normalizeWordForms(wf).map(e => (e.pos || '') + ' ' + (e.forms || []).join(', ')).join('\n');
+}
+
+function textToWordForms(text) {
+  if (!text.trim()) return null;
+  const entries = text.trim().split('\n').map(line => {
+    line = line.trim();
+    const sp = line.indexOf(' ');
+    if (sp < 0) return { pos: line, forms: [] };
+    return { pos: line.slice(0, sp).trim(), forms: line.slice(sp + 1).split(',').map(s => s.trim()).filter(Boolean) };
+  }).filter(e => e.pos);
+  return entries.length ? entries : null;
 }
 
 function shortEmail(email) {
@@ -2059,11 +2081,8 @@ function saveEdit(i) {
   const newDef = document.getElementById('ep-def-' + i).value.trim();
   if (newDef) vocab[i].definition = newDef;
   vocab[i].translation = document.getElementById('ep-zh-' + i).value.trim();
-  const posVal = document.getElementById('ep-pos-' + i)?.value.trim();
-  const formsStr = document.getElementById('ep-forms-' + i)?.value.trim();
-  vocab[i].wordForms = posVal
-    ? { pos: posVal, forms: formsStr ? formsStr.split(',').map(s => s.trim()).filter(Boolean) : [] }
-    : null;
+  const wfText = document.getElementById('ep-wordforms-' + i)?.value || '';
+  vocab[i].wordForms = textToWordForms(wfText);
   touch(vocab[i]);
   const newL = document.getElementById('ep-lesson-new-' + i).value.trim();
   const selL = document.getElementById('ep-lesson-' + i).value;
@@ -2228,22 +2247,24 @@ function showFlashcard() {
   const minH = Math.max(240, 80 + lines * (fontSize * 2.2) + 100);
   const fcInner = document.getElementById('fc-card-inner');
   if (fcInner) fcInner.style.minHeight = minH + 'px';
+  const wfEntries = normalizeWordForms(v.wordForms);
   const fcDefEl = document.getElementById('fc-def');
-  const wfBox = (v.wordForms && v.wordForms.forms && v.wordForms.forms.length) ? renderWordFormsBox(v) : '';
+  const wfBox = wfEntries.length ? renderWordFormsBox(v) : '';
   fcDefEl.innerHTML = wfBox + `<span style="white-space:pre-line">${escHtml(String(v.definition || ''))}</span>`;
   const fcPosEl = document.getElementById('fc-pos-label');
-  if (fcPosEl) fcPosEl.textContent = v.wordForms?.pos || '';
+  if (fcPosEl) fcPosEl.textContent = wfEntries.map(e => e.pos).join(' / ') || '';
   const fcFormsLine = document.getElementById('fc-forms-line');
   if (fcFormsLine) {
-    if (v.wordForms && v.wordForms.pos) {
-      const { pos, forms } = v.wordForms;
-      let ft = '';
-      if (forms && forms.length) {
-        if (pos === 'n.' && forms.length >= 2) ft = `${escHtml(forms[0])} · ${escHtml(forms[1])}`;
-        else if (pos === 'v.' && forms.length >= 3) ft = `${escHtml(forms[0])} · ${escHtml(forms[1])} · has ${escHtml(forms[2])}`;
-        else ft = forms.map(f => escHtml(f)).join(' · ');
-      }
-      fcFormsLine.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px"><span class="pos-badge">${escHtml(pos)}</span>${ft ? `<span style="font-size:14px;color:var(--text2)">${ft}</span>` : ''}</div>`;
+    if (wfEntries.length) {
+      fcFormsLine.innerHTML = wfEntries.map(({ pos, forms }) => {
+        let ft = '';
+        if (forms && forms.length) {
+          if (pos === 'n.' && forms.length >= 2) ft = `${escHtml(forms[0])} · ${escHtml(forms[1])}`;
+          else if (pos === 'v.' && forms.length >= 3) ft = `${escHtml(forms[0])} · ${escHtml(forms[1])} · has ${escHtml(forms[2])}`;
+          else ft = forms.map(f => escHtml(f)).join(' · ');
+        }
+        return `<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:4px"><span class="pos-badge">${escHtml(pos)}</span>${ft ? `<span style="font-size:14px;color:var(--text2)">${ft}</span>` : ''}</div>`;
+      }).join('');
     } else {
       fcFormsLine.innerHTML = '<div class="fc-phase-label">Meaning</div>';
     }
